@@ -1,0 +1,33 @@
+# Core
+torch>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# LLM Serving (CPU fallback strategy)
+# Option A: vLLM CPU (try first)
+# vllm>=0.5.0; platform_machine=="x86_64"
+# Option B: Transformers fallback (always works)
+transformers>=4.40.0
+accelerate>=0.30.0
+
+# Multi-Agent Orchestration
+ray[rllib]>=2.20.0
+
+# API / Server
+fastapi>=0.110.0
+uvicorn>=0.29.0
+
+# Data / Config
+pydantic>=2.0.0
+pyyaml>=6.0
+
+# Visualization
+matplotlib>=3.7.0
+
+# Testing
+pytest>=7.3.0
+pytest-asyncio>=0.23.0
+
+# Optional: vLLM CPU build (uncomment if build succeeds)
+# Requires: cmake, ninja-build, gcc
+# Install via: VLLM_TARGET_DEVICE=cpu pip install vllm

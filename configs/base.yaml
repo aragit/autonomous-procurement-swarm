@@ -1,0 +1,46 @@
+# Autonomous Procurement Swarm — Base Configuration
+
+project:
+  name: "autonomous-procurement-swarm"
+  version: "0.1.0-blueprint"
+  description: "LLM-powered multi-agent contract negotiation"
+
+llm:
+  model_name: "Qwen/Qwen2.5-3B-Instruct"
+  prefer_vllm: false  # Set true if vLLM CPU installed
+  temperature: 0.7
+  max_tokens: 512
+
+market:
+  seed: 42
+  materials: ["steel", "aluminum", "copper", "plastic", "lumber", "rubber"]
+  shock_lambda: 0.05  # Expected shocks per day
+
+negotiation:
+  max_turns: 6
+  valid_materials: ["steel", "aluminum", "copper", "plastic", "lumber", "rubber"]
+  valid_payment_terms: ["net_30", "net_60", "cod", "letter_of_credit"]
+
+agents:
+  buyer:
+    default_budget: 500000.0
+    default_inventory: 5000.0
+    default_consumption: 200.0
+    risk_tolerance: 0.6
+    credit_rating: 0.85
+
+  seller:
+    default_capacity: 10000.0
+    default_utilization: 0.45
+    production_cost: 350.0
+    min_margin: 0.15
+
+rewards:
+  stockout_cost_multiplier: 10.0
+  holding_cost_per_unit: 0.05
+  logistics_cost_base: 500.0
+  risk_premium_base: 0.02
+
+evaluation:
+  pareto_plot_path: "data/pareto.png"
+  ledger_dir: "data"
