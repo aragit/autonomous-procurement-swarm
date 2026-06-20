@@ -79,7 +79,7 @@ python scripts/run_negotiation.py --material steel --max-turns 4
 Runs in under 5 seconds with deterministic but realistic negotiation behavior.
 
 Expected Output:
-
+```text
 ======================================================================
 🤖 AUTONOMOUS PROCUREMENT SWARM — Active Blueprint
    LLM-Powered Multi-Agent Contract Negotiation
@@ -118,6 +118,7 @@ Expected Output:
    Buyer reward: -9.3770
    Seller reward: 7.9224
 ============================================================
+```
 
 ### 3. Real LLM (Optional — Phi-3-mini, ~2GB Download)
 ``` bash
