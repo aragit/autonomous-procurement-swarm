@@ -79,7 +79,7 @@ python scripts/run_negotiation.py --material steel --max-turns 4
 Runs in under 5 seconds with deterministic but realistic negotiation behavior.
 
 Expected Output:
-```Text
+
 ======================================================================
 🤖 AUTONOMOUS PROCUREMENT SWARM — Active Blueprint
    LLM-Powered Multi-Agent Contract Negotiation
@@ -94,7 +94,7 @@ Expected Output:
 [3] Creating agents...
 
 [4] Starting negotiation episode...
-```
+
 ============================================================
 🤝 NEGOTIATION EPISODE 8e64ebd2
    Buyer: AlphaCorp_Buyer | Seller: BetaSteel_Seller
