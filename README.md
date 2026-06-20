@@ -69,3 +69,72 @@ cd autonomous-procurement-swarm
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
+
+### 2. Instant Demo (MockLLM — No Download)
+``` bash
+python scripts/run_negotiation.py --material steel --max-turns 4
+```
+
+Runs in under 5 seconds with deterministic but realistic negotiation behavior.
+
+Expected Output:
+```Text
+======================================================================
+🤖 AUTONOMOUS PROCUREMENT SWARM — Active Blueprint
+   LLM-Powered Multi-Agent Contract Negotiation
+======================================================================
+
+[1] Initializing MockLLM (deterministic, instant)...
+[LLM] Using MockLLM — deterministic, instant, no download
+   Backend: MockLLMEngine
+
+[2] Initializing market simulator...
+
+[3] Creating agents...
+
+[4] Starting negotiation episode...
+```
+============================================================
+🤝 NEGOTIATION EPISODE 8e64ebd2
+   Buyer: AlphaCorp_Buyer | Seller: BetaSteel_Seller
+   Material: steel | Spot: $452.20
+============================================================
+
+--- Turn 1/4 ---
+   🛒 AlphaCorp_Buyer (buyer): COUNTER
+      Reason: Market oversupply and 0% geopolitical risk warrants discount
+
+--- Turn 2/4 ---
+   🏭 BetaSteel_Seller (seller): OFFER
+      Price: $497.42 | Qty: 1000
+
+--- Turn 3/4 ---
+   🛒 AlphaCorp_Buyer (buyer): ACCEPT
+
+============================================================
+✅ DEAL CLOSED
+   Price: $416.02 | Qty: 1000
+   Buyer reward: -9.3770
+   Seller reward: 7.9224
+============================================================
+
+### 3. Real LLM (Optional — Phi-3-mini, ~2GB Download)
+``` bash
+# Phi-3-mini: open license, no HF auth needed
+python scripts/run_negotiation.py --real-llm --model microsoft/Phi-3-mini-4k-instruct --material steel --max-turns 4
+```
+
+For gated models (Qwen2.5-3B), set your HuggingFace token:
+```bash
+export HF_TOKEN=your_token_here
+python scripts/run_negotiation.py --real-llm --model Qwen/Qwen2.5-3B-Instruct --hf-token $HF_TOKEN
+```
+Note: Real LLM mode downloads 2-6GB on first run and requires ~8GB RAM.
+
+### 4. Run Tests
+```bash
+pytest tests/ -v
+```
+All 16 tests pass — protocol validation, market simulation, ledger integrity.
+
