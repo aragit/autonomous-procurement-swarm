@@ -14,15 +14,6 @@
 
 ---
 
-## 📐 Active Blueprint
-
-> **Architecture documented, core components stubbed, runnable skeleton.**
->
-> Real LLM inference (Phi-3-mini / Qwen2.5-3B) is supported but optional.
-> MockLLM mode runs instantly with deterministic negotiation behavior.
-> Zero external API dependencies in default mode.
-
----
 
 ## 🎯 Problem Statement
 
