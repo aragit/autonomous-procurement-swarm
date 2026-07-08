@@ -1,5 +1,4 @@
-# 🤖 Autonomous Procurement Swarm
-
+<h1 align="center">Autonomous Procurement Swarm</h1>
 <p align="center"><b>LLM-Powered Multi-Agent Contract Negotiation for Supply Chain Optimization</b></p>
 
 <p align="center"><sub>Ray · Transformers · vLLM · Multi-Agent RL</sub></p>
