@@ -97,6 +97,7 @@ async def main():
         rfq=rfq,
         suppliers=suppliers,
         policy_context=policy_ctx,
+        market_spot_price=market_state.spot_price,
         timeout_sec=10.0,
     )
     
@@ -119,6 +120,20 @@ async def main():
     for i, bid in enumerate(result['valid_bids'], 1):
         print(f"   {i}. {bid['supplier_id']}: ${bid['unit_price']:,.2f} | "
               f"Lead: {bid['lead_time_days']}d | Carbon: {bid['carbon_footprint_kg']:,.0f}kg")
+    
+    print(f"\n📊 COMPOSITE SCORE BREAKDOWN (Spot: ${market_state.spot_price:,.2f}):")
+    for bid_info in result.get("scored_bids", []):
+        print(f"   {bid_info['supplier_id']}: "
+              f"Score={bid_info['composite_score']:.4f} | "
+              f"Price=${bid_info['unit_price']:,.2f} | "
+              f"Lead={bid_info['lead_time_days']}d | "
+              f"Carbon={bid_info['carbon_footprint_kg']:,.0f}kg | "
+              f"Rel={bid_info['reliability_score']:.0%}")
+    
+    if result.get("shortlist"):
+        print(f"\n🔀 SHORTLIST (top-{len(result['shortlist'])} for Sprint 3 bartering):")
+        for s in result["shortlist"]:
+            print(f"   {s['supplier_id']} (score={s['composite_score']:.4f})")
     
     if result['rejections']:
         print(f"\n❌ REJECTIONS ({len(result['rejections'])}):")

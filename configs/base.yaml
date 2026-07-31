@@ -41,3 +41,16 @@ rewards:
 evaluation:
   pareto_plot_path: "data/pareto.png"
   ledger_dir: "data"
+  esg_baselines:
+    steel: 1800.0
+    aluminum: 12000.0
+    copper: 3000.0
+    plastic: 2500.0
+    lumber: 200.0
+    rubber: 2800.0
+  scoring_weights:
+    price: 0.40
+    lead_time: 0.25
+    esg: 0.20
+    reliability: 0.15
+  shortlist_size: 2

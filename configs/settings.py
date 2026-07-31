@@ -1,7 +1,7 @@
 """Application settings loaded from YAML and environment variables."""
 
 from pathlib import Path
-from typing import List
+from typing import List, Dict
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import yaml
@@ -46,6 +46,26 @@ class AgentSettings(BaseSettings):
     seller_min_margin: float = 0.15
 
 
+class EvaluationSettings(BaseSettings):
+    pareto_plot_path: str = "data/pareto.png"
+    ledger_dir: str = "data"
+    esg_baselines: Dict[str, float] = Field(default_factory=lambda: {
+        "steel": 1800.0,
+        "aluminum": 12000.0,
+        "copper": 3000.0,
+        "plastic": 2500.0,
+        "lumber": 200.0,
+        "rubber": 2800.0,
+    })
+    scoring_weights: Dict[str, float] = Field(default_factory=lambda: {
+        "price": 0.40,
+        "lead_time": 0.25,
+        "esg": 0.20,
+        "reliability": 0.15,
+    })
+    shortlist_size: int = 2
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PROCUREMENT_",
@@ -57,6 +77,7 @@ class Settings(BaseSettings):
     market: MarketSettings = Field(default_factory=MarketSettings)
     negotiation: NegotiationSettings = Field(default_factory=NegotiationSettings)
     agents: AgentSettings = Field(default_factory=AgentSettings)
+    evaluation: EvaluationSettings = Field(default_factory=EvaluationSettings)
 
     @classmethod
     def from_yaml(cls, path: Path | None = None) -> "Settings":

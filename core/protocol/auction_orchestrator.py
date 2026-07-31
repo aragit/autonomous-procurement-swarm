@@ -6,6 +6,8 @@ from core.protocol.schema import RFQPayload, CNPMessage, MessageType, BidPayload
 from core.protocol.fsm import GlobalAuctionFSM, GlobalAuctionState
 from core.protocol.policy_engine import PolicyEngine, PolicyContext
 from core.agents.supplier import SupplierAgent
+from core.evaluator.scoring import MultiCriteriaEvaluator, EvaluationWeights
+from configs.settings import settings
 
 try:
     from core.ledger.repository import PostgresLedgerRepository  # type: ignore  # noqa: F401
@@ -18,29 +20,33 @@ class AuctionOrchestrator:
     1. Broadcast RFQ
     2. Collect bids in parallel (asyncio.gather)
     3. Policy validation
-    4. Ranking (placeholder for Sprint 2)
+    4. Multi-criteria scoring + shortlist (Sprint 2)
     5. Award / Reject
     """
-    
+
     def __init__(
         self,
         policy_engine: PolicyEngine,
+        evaluator: MultiCriteriaEvaluator = None,
         ledger: Any = None,  # Will wire in Sprint 4
     ):
         self.policy = policy_engine
+        self.evaluator = evaluator
         self.ledger = ledger
-    
+
     async def run_sealed_bid_auction(
         self,
         session_id: str,
         rfq: RFQPayload,
         suppliers: List[SupplierAgent],
         policy_context: PolicyContext,
+        market_spot_price: float,
         timeout_sec: float = 30.0,
     ) -> Dict[str, Any]:
         """
         Execute full 1×N sealed bid auction.
-        Returns dict with: session_id, fsm_state, valid_bids, rejections, winner, awards
+        Returns dict with: session_id, fsm_state, valid_bids, rejections, winner, awards,
+        scored_bids, shortlist.
         """
         fsm = GlobalAuctionFSM(session_id)
         
@@ -97,12 +103,30 @@ class AuctionOrchestrator:
                     "reason": reason,
                 })
         
-        # Sprint 2: Add scoring here. For now, rank by lowest price.
-        valid_bids.sort(key=lambda b: b.unit_price)
-        
+        # Sprint 2: Multi-criteria scoring + shortlist
+        if self.evaluator is None:
+            evaluator = MultiCriteriaEvaluator(
+                weights=EvaluationWeights(),
+                esg_baselines=settings.evaluation.esg_baselines,
+            )
+        else:
+            evaluator = self.evaluator
+
+        ranked = evaluator.rank_bids(
+            valid_bids,
+            market_spot_price=market_spot_price,
+            target_lead_time=rfq.target_lead_time_days,
+            material=rfq.material,
+        )
+
+        ranked_bids = [bid for _, bid in ranked]
+        shortlist_size = settings.evaluation.shortlist_size
+        shortlist = ranked[:shortlist_size]   # List[(score, BidPayload)]
+        losers = ranked[shortlist_size:]      # List[(score, BidPayload)]
+
         # Phase 4: Award or Terminate
-        if valid_bids:
-            winner = valid_bids[0]
+        if ranked_bids:
+            winner = ranked_bids[0]
             if not fsm.transition(GlobalAuctionState.AWARDED):
                 raise RuntimeError("FSM failed to transition to AWARDED")
             
@@ -120,7 +144,7 @@ class AuctionOrchestrator:
             
             # Rejections for non-winners
             loser_rejects = []
-            for bid in valid_bids[1:]:
+            for _, bid in ranked[1:]:
                 loser_rejects.append(CNPMessage.from_payload(
                     MessageType.REJECT_BID,
                     {
@@ -135,9 +159,27 @@ class AuctionOrchestrator:
                 "fsm_state": fsm.state.name,
                 "winner": winner.model_dump(),
                 "award": award.model_dump(),
-                "valid_bids": [b.model_dump() for b in valid_bids],
+                "valid_bids": [b.model_dump() for b in ranked_bids],
                 "rejections": policy_rejections + [r.payload for r in reject_messages] + [r.payload for r in loser_rejects],
                 "failures": failures,
+                "scored_bids": [
+                    {
+                        "supplier_id": bid.supplier_id,
+                        "unit_price": bid.unit_price,
+                        "lead_time_days": bid.lead_time_days,
+                        "carbon_footprint_kg": bid.carbon_footprint_kg,
+                        "reliability_score": bid.reliability_score,
+                        "composite_score": score,
+                    }
+                    for score, bid in ranked
+                ],
+                "shortlist": [
+                    {
+                        "supplier_id": bid.supplier_id,
+                        "composite_score": score,
+                    }
+                    for score, bid in shortlist
+                ],
                 "success": True,
             }
         else:
@@ -151,5 +193,7 @@ class AuctionOrchestrator:
                 "valid_bids": [],
                 "rejections": policy_rejections + [r.payload for r in reject_messages],
                 "failures": failures,
+                "scored_bids": [],
+                "shortlist": [],
                 "success": False,
             }

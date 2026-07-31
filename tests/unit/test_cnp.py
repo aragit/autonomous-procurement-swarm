@@ -175,6 +175,7 @@ async def test_full_auction_3_suppliers(mock_llm, policy_engine):
         rfq=rfq,
         suppliers=suppliers,
         policy_context=ctx,
+        market_spot_price=450.0,
         timeout_sec=5.0,
     )
     
@@ -183,3 +184,7 @@ async def test_full_auction_3_suppliers(mock_llm, policy_engine):
     assert result["winner"] is not None
     assert len(result["valid_bids"]) == 3
     assert len(result["rejections"]) == 2  # 2 losers get OUTBID rejections
+    # Sprint 2: auction result includes multi-criteria scores
+    assert "scored_bids" in result
+    assert len(result["scored_bids"]) == 3
+    assert "shortlist" in result
