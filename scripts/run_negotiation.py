@@ -9,12 +9,9 @@ Usage:
     python scripts/run_negotiation.py --real-llm         # Real Phi-3-mini LLM
 """
 
-import sys
 import os
 import argparse
 import uuid
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.llm_engine import LLMEngineFactory
 from core.agents import BuyerAgent, SellerAgent, MarketAgent, ArbiterAgent, AgentState
@@ -67,7 +64,7 @@ def main():
     # Initialize market
     print(f"\n[2] Initializing market simulator...")
     market_sim = MarketSimulator(seed=42)
-    market_state = market_sim.get_state(args.material)
+    market_state = market_sim.get_current_state(args.material)
 
     # Create agents
     print(f"\n[3] Creating agents...")

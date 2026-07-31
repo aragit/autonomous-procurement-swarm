@@ -102,6 +102,7 @@ class BuyerAgent(BaseAgent):
     def prepare_context(self, market_state, material: str) -> Dict[str, Any]:
         """Build context dict for prompt rendering."""
         return {
+            "material": material,
             "inventory_cap": self.state.capacity,
             "current_stock": self.state.inventory,
             "consumption_rate": self.state.utilization,
@@ -123,6 +124,7 @@ class SellerAgent(BaseAgent):
 
     def prepare_context(self, market_state, material: str, buyer_rating: float) -> Dict[str, Any]:
         return {
+            "material": material,
             "capacity": self.state.capacity,
             "utilization": self.state.utilization,
             "production_cost": self.state.production_cost,

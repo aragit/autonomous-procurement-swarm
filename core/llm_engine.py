@@ -78,9 +78,10 @@ class MockLLMEngine(BaseLLMEngine):
         # Extract context values from prompt
         spot_price = self._extract_float(system_prompt, "spot price: $")
         geo_risk = self._extract_float(system_prompt, "geopolitical risk:")
+        material = self._extract_material(system_prompt)
 
         # Generate contextually appropriate response
-        content = self._generate_response(role, spot_price, geo_risk)
+        content = self._generate_response(role, spot_price, geo_risk, material)
 
         latency_ms = (time.time() - start) * 1000
 
@@ -107,7 +108,15 @@ class MockLLMEngine(BaseLLMEngine):
         except (ValueError, IndexError):
             return 0.0
 
-    def _generate_response(self, role: str, spot_price: float, geo_risk: float) -> str:
+    def _extract_material(self, text: str) -> str:
+        # Look for "Material: <value>" or extract from prompt context
+        import re
+        match = re.search(r"material:\s*(\w+)", text, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+        return "steel"  # fallback
+
+    def _generate_response(self, role: str, spot_price: float, geo_risk: float, material: str = "steel") -> str:
         """Generate deterministic but realistic negotiation response."""
         if role == "buyer":
             # Buyer counters at 85-95% of spot, or accepts if price is low
@@ -115,7 +124,7 @@ class MockLLMEngine(BaseLLMEngine):
                 counter = round(spot_price * self.rng.uniform(0.85, 0.95), 2)
                 return json.dumps({
                     "type": "counter",
-                    "material": "steel",
+                    "material": material,
                     "quantity": self.rng.choice([500, 1000, 2000]),
                     "counter_price": counter,
                     "justification": f"Market oversupply and {geo_risk:.0%} geopolitical risk warrants discount",
@@ -124,7 +133,7 @@ class MockLLMEngine(BaseLLMEngine):
             else:
                 return json.dumps({
                     "type": "accept",
-                    "material": "steel",
+                    "material": material,
                     "quantity": 1000,
                     "final_price": round(spot_price * 0.92, 2) if spot_price > 0 else 400.0,
                     "delivery_date": "2026-07-15"
@@ -136,7 +145,7 @@ class MockLLMEngine(BaseLLMEngine):
                 offer = round(spot_price * self.rng.uniform(1.05, 1.15), 2)
                 return json.dumps({
                     "type": "counter",
-                    "material": "steel",
+                    "material": material,
                     "quantity": self.rng.choice([500, 1000, 2000]),
                     "counter_price": offer,
                     "justification": f"Premium quality and supply chain resilience amid {geo_risk:.0%} risk",
@@ -145,8 +154,8 @@ class MockLLMEngine(BaseLLMEngine):
             else:
                 return json.dumps({
                     "type": "offer",
-                    "material": "steel",
-                    "quantity": 1000,
+                    "material": material,
+                    "quantity": self.rng.choice([500, 1000, 2000]),
                     "unit_price": round(spot_price * 1.10, 2) if spot_price > 0 else 500.0,
                     "delivery_date": "2026-07-15",
                     "payment_terms": "net_30"
@@ -156,7 +165,7 @@ class MockLLMEngine(BaseLLMEngine):
             trend = "rising" if self.rng.random() > 0.5 else "falling"
             return json.dumps({
                 "type": "report",
-                "material": "steel",
+                "material": material,
                 "spot_price": round(spot_price, 2) if spot_price > 0 else 450.0,
                 "trend": trend,
                 "volatility": round(self.rng.uniform(0.1, 0.4), 2),
@@ -196,14 +205,11 @@ class TransformersEngine(BaseLLMEngine):
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.model_name = model_name
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name, trust_remote_code=True
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype="auto",
             device_map=device,
-            trust_remote_code=True,
         )
         self.model.eval()
 
@@ -281,7 +287,10 @@ class VLLMEngine(BaseLLMEngine):
         print(f"[LLM] Loading {model_name} via vLLM (CPU)...")
         start = time.time()
 
+        from transformers import AutoTokenizer
+
         self.model_name = model_name
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         self.llm = LLM(
             model=model_name,
             tensor_parallel_size=tensor_parallel_size,
@@ -303,7 +312,9 @@ class VLLMEngine(BaseLLMEngine):
 
         from vllm import SamplingParams
 
-        prompt = self._format_chat(messages)
+        prompt = self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
 
         sp = SamplingParams(
             temperature=temperature,
@@ -322,20 +333,6 @@ class VLLMEngine(BaseLLMEngine):
             latency_ms=latency_ms,
             model=self.model_name,
         )
-
-    def _format_chat(self, messages: List[Dict[str, str]]) -> str:
-        """Simple chat formatting for vLLM."""
-        parts = []
-        for msg in messages:
-            role = msg["role"]
-            content = msg["content"]
-            if role == "system":
-                parts.append(f"System: {content}")
-            elif role == "user":
-                parts.append(f"User: {content}")
-            elif role == "assistant":
-                parts.append(f"Assistant: {content}")
-        return "\n".join(parts) + "\nAssistant:"
 
     def shutdown(self):
         pass

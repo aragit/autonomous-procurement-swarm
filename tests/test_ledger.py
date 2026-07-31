@@ -23,7 +23,8 @@ def test_ledger_append():
     )
     ledger.append(entry)
     assert len(ledger.entries) == 1
-    assert ledger.last_hash != "0" * 16
+    assert ledger.last_hash != "0" * 64
+    assert len(ledger.last_hash) == 64
 
 
 def test_ledger_integrity():

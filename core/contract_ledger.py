@@ -49,7 +49,7 @@ class LedgerEntry:
             "justification": self.justification,
             "prev_hash": self.prev_hash,
         }, sort_keys=True, default=str)
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
+        return hashlib.sha256(content.encode()).hexdigest()
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -60,7 +60,7 @@ class ContractLedger:
 
     def __init__(self):
         self.entries: List[LedgerEntry] = []
-        self.last_hash = "0" * 16
+        self.last_hash = "0" * 64
 
     def append(self, entry: LedgerEntry):
         """Add entry with hash chaining."""
@@ -77,7 +77,7 @@ class ContractLedger:
         """Verify hash chain integrity."""
         for i, entry in enumerate(self.entries):
             if i == 0:
-                if entry.prev_hash != "0" * 16:
+                if entry.prev_hash != "0" * 64:
                     return False
             else:
                 if entry.prev_hash != self.entries[i-1].hash:

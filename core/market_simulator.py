@@ -197,8 +197,24 @@ class MarketSimulator:
 
         return states
 
+    def get_current_state(self, material: str) -> MarketState:
+        """Return current market state for material WITHOUT advancing simulation."""
+        process = self.price_processes[material]
+        return MarketState(
+            date=self.date,
+            material=material,
+            spot_price=round(process.price, 2),
+            volatility=round(0.15 + self.risk_model.current_regime.value * 0.15, 2),
+            geo_risk=round(self.risk_model.get_risk_score(), 2),
+            risk_regime=self.risk_model.current_regime,
+            supply_health=round(max(1.0 - self.risk_model.current_regime.value * 0.25, 0.1), 2),
+            price_trend=round(process.get_trend(), 2),
+            events=self.event_log[-3:] if self.event_log else [],
+        )
+
     def get_state(self, material: str) -> MarketState:
-        """Get current state for specific material."""
-        # Step once if needed
-        states = self.step()
-        return states[material]
+        """Return current market state for a material without advancing simulation.
+
+        Deprecated alias for :meth:`get_current_state`.
+        """
+        return self.get_current_state(material)

@@ -55,6 +55,7 @@ You negotiate with sellers via structured messages. Respond ONLY with a single J
 
 ## Market Context
 
+- Material: {material}
 - Current spot price: ${spot_price:,.2f}
 - 30-day volatility: {volatility:.1f}%
 - Geopolitical risk: {geo_risk:.2f} (0=stable, 1=crisis)
@@ -111,6 +112,7 @@ You negotiate with buyers via structured messages. Respond ONLY with a single JS
 
 ## Market Context
 
+- Material: {material}
 - Current spot price: ${spot_price:,.2f}
 - 30-day volatility: {volatility:.1f}%
 - Geopolitical risk: {geo_risk:.2f}
