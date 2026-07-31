@@ -1,5 +1,8 @@
 # Python
 __pycache__/
+
+# Generated source dump (never commit)
+SOURCE_CODE.md
 *.py[cod]
 *$py.class
 *.so
