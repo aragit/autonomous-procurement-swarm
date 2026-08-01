@@ -93,7 +93,7 @@ Built for **determinism, observability, and auditability**, every state transiti
 
 ```mermaid
 flowchart TB
-    subgraph AuctionPhase["🔷 Sealed-Bid Auction Phase"]
+    subgraph AuctionPhase["Sealed-Bid Auction Phase"]
         B[Buyer Orchestrator] -->|RFQ Broadcast| S1[Supplier A]
         B -->|RFQ Broadcast| S2[Supplier B]
         B -->|RFQ Broadcast| S3[Supplier C]
@@ -103,24 +103,24 @@ flowchart TB
         PE -->|Valid Bids| MCE[Multi-Criteria Evaluator]
     end
 
-    subgraph BarteringPhase["🔶 Bilateral Bartering Phase"]
-        MCE -->|Shortlist Top-K| FSM1[Bilateral FSM: Buyer ↔ A]
-        MCE -->|Shortlist Top-K| FSM2[Bilateral FSM: Buyer ↔ B]
+    subgraph BarteringPhase["Bilateral Bartering Phase"]
+        MCE -->|Shortlist Top-K| FSM1[Bilateral FSM: Buyer vs A]
+        MCE -->|Shortlist Top-K| FSM2[Bilateral FSM: Buyer vs B]
         FSM1 -->|Best Deal| AWARD[Award Engine]
         FSM2 -->|Best Deal| AWARD
     end
 
-    subgraph Persistence["💾 Persistence Layer"]
+    subgraph Persistence["Persistence Layer"]
         AWARD -->|Append-Only Events| PG[(PostgreSQL + pgvector)]
         PG -->|Hash Chain| VERIFY[Chain Verification]
         PG -->|Vector Search| SIM[Similarity Queries]
     end
 
-    subgraph API["🌐 FastAPI Control Plane"]
-        HEALTH[/health]
-        AUCTIONS[/auctions]
-        LEDGER[/ledger/stats]
-        SUPPLIERS[/suppliers]
+    subgraph API["FastAPI Control Plane"]
+        HEALTH[health]
+        AUCTIONS[auctions]
+        LEDGER[ledger-stats]
+        SUPPLIERS[suppliers]
     end
 
     AuctionPhase --> BarteringPhase
