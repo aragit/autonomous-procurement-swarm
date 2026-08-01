@@ -8,11 +8,10 @@ Models:
 - Inventory dynamics: consumption and production
 """
 
-import numpy as np
-from typing import Dict, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
-import random
+
+import numpy as np
 
 
 class RiskRegime(Enum):
@@ -32,9 +31,9 @@ class MarketState:
     risk_regime: RiskRegime
     supply_health: float
     price_trend: float  # 7-day % change
-    events: List[str] = None
+    events: list[str] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.events is None:
             self.events = []
 
@@ -42,12 +41,14 @@ class MarketState:
 class GeopoliticalRiskModel:
     """Markov chain for geopolitical risk regimes."""
 
-    TRANSITION_MATRIX = np.array([
-        [0.85, 0.12, 0.03, 0.00],  # LOW
-        [0.20, 0.60, 0.15, 0.05],  # MEDIUM
-        [0.10, 0.30, 0.40, 0.20],  # HIGH
-        [0.05, 0.15, 0.30, 0.50],  # CRISIS
-    ])
+    TRANSITION_MATRIX = np.array(
+        [
+            [0.85, 0.12, 0.03, 0.00],  # LOW
+            [0.20, 0.60, 0.15, 0.05],  # MEDIUM
+            [0.10, 0.30, 0.40, 0.20],  # HIGH
+            [0.05, 0.15, 0.30, 0.50],  # CRISIS
+        ]
+    )
 
     REGIME_MULTIPLIERS = {
         RiskRegime.LOW: 1.0,
@@ -56,16 +57,14 @@ class GeopoliticalRiskModel:
         RiskRegime.CRISIS: 2.00,
     }
 
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42) -> None:
         self.rng = np.random.RandomState(seed)
         self.current_regime = RiskRegime.LOW
 
     def step(self) -> RiskRegime:
         """Advance one time step."""
         probs = self.TRANSITION_MATRIX[self.current_regime.value]
-        self.current_regime = RiskRegime(
-            self.rng.choice(len(RiskRegime), p=probs)
-        )
+        self.current_regime = RiskRegime(self.rng.choice(len(RiskRegime), p=probs))
         return self.current_regime
 
     def get_risk_score(self) -> float:
@@ -76,14 +75,14 @@ class GeopoliticalRiskModel:
 class SupplyShockGenerator:
     """Poisson supply shocks with log-normal magnitude."""
 
-    def __init__(self, lambda_rate: float = 0.05, seed: int = 42):
+    def __init__(self, lambda_rate: float = 0.05, seed: int = 42) -> None:
         self.lambda_rate = lambda_rate  # Expected shocks per period
         self.rng = np.random.RandomState(seed)
 
-    def generate(self) -> Tuple[bool, float, str]:
+    def generate(self) -> tuple[bool, float, str]:
         """Return (shock_occurred, magnitude, description)."""
         if self.rng.poisson(self.lambda_rate) > 0:
-            magnitude = self.rng.lognormal(0, 0.5)  # Multiplier
+            magnitude = float(self.rng.lognormal(0, 0.5))  # Multiplier
             descriptions = [
                 "Port closure due to labor strike",
                 "Sanctions on major supplier country",
@@ -92,7 +91,9 @@ class SupplyShockGenerator:
                 "Shipping lane blockage",
                 "Factory fire at key producer",
             ]
-            return True, magnitude, self.rng.choice(descriptions)
+            # np.random.choice returns a numpy str_; coerce to native str
+            desc = str(self.rng.choice(descriptions))
+            return True, magnitude, desc
         return False, 1.0, ""
 
 
@@ -108,14 +109,14 @@ class PriceProcess:
         "rubber": 1800.0,
     }
 
-    def __init__(self, material: str, seed: int = 42):
+    def __init__(self, material: str, seed: int = 42) -> None:
         self.material = material
         self.base_price = self.BASE_PRICES.get(material, 1000.0)
         self.price = self.base_price
         self.rng = np.random.RandomState(seed)
         self.history = [self.price]
 
-    def step(self, regime: RiskRegime, shock: Tuple[bool, float, str]) -> float:
+    def step(self, regime: RiskRegime, shock: tuple[bool, float, str]) -> float:
         """Advance one time step."""
         dt = 1 / 252  # Daily step
 
@@ -130,9 +131,9 @@ class PriceProcess:
             mu, sigma = -0.15, 0.60
 
         # GBM step
-        dW = self.rng.normal(0, np.sqrt(dt))
-        dP = mu * self.price * dt + sigma * self.price * dW
-        self.price = max(self.price + dP, self.base_price * 0.1)
+        dw = self.rng.normal(0, np.sqrt(dt))
+        dp = mu * self.price * dt + sigma * self.price * dw
+        self.price = max(self.price + dp, self.base_price * 0.1)
 
         # Apply shock
         if shock[0]:
@@ -145,7 +146,7 @@ class PriceProcess:
         """Return price change % over window."""
         if len(self.history) < window + 1:
             return 0.0
-        return (self.history[-1] - self.history[-window-1]) / self.history[-window-1] * 100
+        return (self.history[-1] - self.history[-window - 1]) / self.history[-window - 1] * 100
 
 
 class MarketSimulator:
@@ -153,23 +154,21 @@ class MarketSimulator:
 
     MATERIALS = ["steel", "aluminum", "copper", "plastic", "lumber", "rubber"]
 
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42) -> None:
         self.rng = np.random.RandomState(seed)
         self.risk_model = GeopoliticalRiskModel(seed)
         self.shock_generator = SupplyShockGenerator(seed=seed)
-        self.price_processes = {
-            m: PriceProcess(m, seed + i)
-            for i, m in enumerate(self.MATERIALS)
-        }
+        self.price_processes = {m: PriceProcess(m, seed + i) for i, m in enumerate(self.MATERIALS)}
         self.day = 0
         self.date = "2026-01-01"
-        self.event_log = []
+        self.event_log: list[str] = []
 
-    def step(self) -> Dict[str, MarketState]:
+    def step(self) -> dict[str, MarketState]:
         """Advance simulation one day. Return market states for all materials."""
         self.day += 1
         # Simple date increment (ignore month boundaries for simulation)
         from datetime import datetime, timedelta
+
         current = datetime.strptime(self.date, "%Y-%m-%d")
         current += timedelta(days=1)
         self.date = current.strftime("%Y-%m-%d")

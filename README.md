@@ -1,131 +1,134 @@
-<h1 align="center">Autonomous Procurement Swarm</h1>
-<p align="center"><b>LLM-Powered Multi-Agent Contract Negotiation for Supply Chain Optimization</b></p>
+# Autonomous Procurement Swarm
 
-<p align="center"><sub>Ray · Transformers · vLLM · Multi-Agent RL</sub></p>
+**Agentic e-Procurement Auction Platform**
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Status-📐%20Active%20Blueprint-blue" alt="Active Blueprint">
-  <img src="https://img.shields.io/badge/PyTorch-2.0+-red?logo=pytorch" alt="PyTorch">
-  <img src="https://img.shields.io/badge/Python-3.9+-blue?logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/Tests-16%20passing-brightgreen" alt="Tests">
-  <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT">
-</p>
+A production-grade, asynchronous multi-agent system for autonomous procurement negotiations. Executes 1×N sealed-bid reverse auctions with multi-criteria scoring, bilateral bartering, and immutable audit trails.
 
----
+## What This Is
 
+- **Reverse Auction Engine**: One buyer broadcasts an RFQ to N suppliers who bid in parallel
+- **Multi-Criteria Scoring**: Awards based on Price (40%) + Lead Time (25%) + ESG/Carbon (20%) + Reliability (15%)
+- **Bilateral Bartering**: Top-K shortlisted suppliers enter concurrent negotiation threads with formal FSMs
+- **Policy Enforcement**: Deterministic rule engine validates spend caps, blacklists, ESG limits, and bid bonds
+- **Immutable Ledger**: SHA-256 hash-chained events in PostgreSQL with chain verification
+- **Semantic Memory**: pgvector-backed supplier profiles with concession slope tracking
+- **FastAPI Control Plane**: HTTP endpoints for auction execution, audit, and analytics
 
-## 🎯 Problem Statement
+## What This Is NOT
 
-Procurement teams waste millions on suboptimal contract negotiations. Buyers and sellers operate in information asymmetry — neither knows the other's true reservation price, inventory constraints, or risk tolerance. Traditional e-procurement platforms are rigid rule-based systems that cannot adapt to volatile markets, geopolitical shocks, or complex multi-variable tradeoffs.
+- ❌ Not a reinforcement learning system (no policy gradients, no training loop)
+- ❌ Not a general supply chain optimizer (no inventory forecasting, no logistics routing)
+- ❌ Not a legally binding contract generator (generates structured data, not legal documents)
+- ❌ Not connected to live market data (uses synthetic GBM simulation)
 
-**Autonomous Procurement Swarm** deploys LLM-powered agents that negotiate procurement contracts autonomously, incorporating live market pricing, geopolitical risk scores, and inventory constraints into multi-turn strategic bargaining.
+## Architecture
 
----
+```
+[Buyer Orchestrator]
+│
+▼ RFQ Broadcast (asyncio.gather)
+[Supplier Pool: 1..N]
+│
+▼ Bids
+[Policy Engine] ──► [Multi-Criteria Evaluator]
+│
+▼ Shortlist Top-K
+[Bilateral Threads: Buyer ↔ Supplier (per-pair FSM)]
+│
+▼ Best Deal
+[PostgreSQL Ledger] + [pgvector Memory]
+```
 
-## 🏗️ System Architecture
-
-**Agent Layer:** Buyer Agent, Seller Agent, Market Intelligence Agent, Arbiter Agent — each powered by role-specific LLM system prompts with structured JSON output.
-
-**Orchestration Layer:** Turn-based negotiation protocol with Ray actor framework, shared context window, and immutable contract ledger.
-
-**Market Layer:** Stochastic price simulation (Geometric Brownian Motion with regime-switching), geopolitical risk Markov chain, Poisson supply shocks.
-
-**Validation Layer:** Protocol validation, hash-chained audit trail, Pareto efficiency analysis, reward computation.
-
----
-
-## 🔬 Core Components
-
-| Component | File | Status | Description |
-|-----------|------|--------|-------------|
-| **LLM Engine** | `core/llm_engine.py` | Functional | MockLLM + Transformers + vLLM backends |
-| **Prompts** | `core/prompts.py` | Functional | Role-specific system prompts (buyer/seller/market/arbiter) |
-| **Protocol** | `core/negotiation_protocol.py` | Functional | JSON DSL for offers/counters/accepts/rejects |
-| **Market Sim** | `core/market_simulator.py` | Functional | GBM prices, geopolitical risk, supply shocks |
-| **Agents** | `core/agents.py` | Functional | Buyer/Seller/Market/Arbiter agent classes |
-| **Ledger** | `core/contract_ledger.py` | Functional | Immutable hash-chained negotiation log |
-| **Rewards** | `core/rewards.py` | Functional | Buyer cost minimization, seller margin maximization |
-| **Orchestration** | `orchestration/negotiation_env.py` | Functional | Episode runner with turn management |
-
----
-
-## 🚀 Quick Start
-
-### 1. Clone & Setup
+## Quick Start
 
 ```bash
+# 1. Clone and install
 git clone https://github.com/aragit/autonomous-procurement-swarm.git
 cd autonomous-procurement-swarm
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
+
+# 2. Start PostgreSQL with pgvector
+docker compose up -d
+
+# 3. Run the CLI demo
+python scripts/run_cnp_auction.py
+
+# 4. Or start the API
+uvicorn api.main:app --reload --port 8000
+
+# 5. Create an auction via API
+curl -X POST http://localhost:8000/auctions \
+  -H "Content-Type: application/json" \
+  -d '{"material":"steel","quantity":1000,"supplier_count":5,"enable_bartering":true}'
 ```
 
-### 2. Instant Demo (MockLLM — No Download)
-``` bash
-python scripts/run_negotiation.py --material steel --max-turns 4
-```
+## API Endpoints
 
-Runs in under 5 seconds with deterministic but realistic negotiation behavior.
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Service and database status |
+| `/auctions` | POST | Start new sealed-bid auction |
+| `/auctions/{id}` | GET | Retrieve auction events + chain validity |
+| `/auctions/{id}/stats` | GET | Auction statistics |
+| `/ledger/stats` | GET | Global ledger statistics |
+| `/suppliers` | GET | List all suppliers with memory profiles |
+| `/suppliers/{id}/profile` | GET | Supplier heuristic + vector profile |
+| `/suppliers/similar` | GET | Find behaviorally similar suppliers |
 
-Expected Output:
-```text
-======================================================================
-🤖 AUTONOMOUS PROCUREMENT SWARM — Active Blueprint
-   LLM-Powered Multi-Agent Contract Negotiation
-======================================================================
+## Testing
 
-[1] Initializing MockLLM (deterministic, instant)...
-[LLM] Using MockLLM — deterministic, instant, no download
-   Backend: MockLLMEngine
-
-[2] Initializing market simulator...
-
-[3] Creating agents...
-
-[4] Starting negotiation episode...
-
-============================================================
-🤝 NEGOTIATION EPISODE 8e64ebd2
-   Buyer: AlphaCorp_Buyer | Seller: BetaSteel_Seller
-   Material: steel | Spot: $452.20
-============================================================
-
---- Turn 1/4 ---
-   🛒 AlphaCorp_Buyer (buyer): COUNTER
-      Reason: Market oversupply and 0% geopolitical risk warrants discount
-
---- Turn 2/4 ---
-   🏭 BetaSteel_Seller (seller): OFFER
-      Price: $497.42 | Qty: 1000
-
---- Turn 3/4 ---
-   🛒 AlphaCorp_Buyer (buyer): ACCEPT
-
-============================================================
-✅ DEAL CLOSED
-   Price: $416.02 | Qty: 1000
-   Buyer reward: -9.3770
-   Seller reward: 7.9224
-============================================================
-```
-
-### 3. Real LLM (Optional — Phi-3-mini, ~2GB Download)
-``` bash
-# Phi-3-mini: open license, no HF auth needed
-python scripts/run_negotiation.py --real-llm --model microsoft/Phi-3-mini-4k-instruct --material steel --max-turns 4
-```
-
-For gated models (Qwen2.5-3B), set your HuggingFace token:
 ```bash
-export HF_TOKEN=your_token_here
-python scripts/run_negotiation.py --real-llm --model Qwen/Qwen2.5-3B-Instruct --hf-token $HF_TOKEN
-```
-Note: Real LLM mode downloads 2-6GB on first run and requires ~8GB RAM.
-
-### 4. Run Tests
-```bash
+# Unit + integration tests (requires PostgreSQL on port 5433)
 pytest tests/ -v
-```
-All 16 tests pass — protocol validation, market simulation, ledger integrity.
 
+# With coverage
+pytest tests/ --cov=core --cov=api
+
+# Load test
+pytest tests/integration/test_load.py -v
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Python 3.11+ |
+| Async Runtime | asyncio |
+| Web Framework | FastAPI |
+| Database | PostgreSQL 16 + pgvector |
+| ORM | SQLAlchemy 2.0 (async) |
+| Vector Search | pgvector |
+| Logging | structlog (JSON) |
+| Validation | Pydantic v2 |
+| Testing | pytest + pytest-asyncio + httpx |
+| Linting | ruff |
+| Type Checking | mypy (strict) |
+| Packaging | hatchling |
+
+## Project Structure
+
+```
+autonomous-procurement-swarm/
+├── api/                    # FastAPI application
+├── core/
+│   ├── agents/             # Buyer orchestrator, Supplier agents
+│   ├── evaluator/          # Multi-criteria scoring engine
+│   ├── engine/             # LLM backends (Mock, Transformers, vLLM)
+│   ├── ledger/             # PostgreSQL hash-chained repository
+│   ├── memory/             # Heuristic estimator + pgvector store
+│   ├── protocol/           # CNP schemas, FSM, policy engine, auction orchestrator
+│   └── simulator/          # Stochastic market simulation (GBM)
+├── configs/                # Pydantic-settings + YAML
+├── policy/                 # Rego policies (optional enterprise extension)
+├── scripts/                # CLI demos
+├── tests/
+│   ├── unit/               # Protocol, scoring, memory, FSM tests
+│   └── integration/        # API + load tests
+├── docker-compose.yml
+├── pyproject.toml
+└── README.md
+```
+
+## License
+
+MIT

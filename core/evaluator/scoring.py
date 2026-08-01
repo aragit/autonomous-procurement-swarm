@@ -1,7 +1,11 @@
 """Multi-criteria utility scoring for supplier bid evaluation."""
 
-from typing import List, Dict
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from core.protocol.schema import BidPayload
+
 
 class EvaluationWeights(BaseModel):
     price_weight: float = Field(default=0.40, ge=0.0, le=1.0)
@@ -11,18 +15,20 @@ class EvaluationWeights(BaseModel):
 
     @field_validator("price_weight")
     @classmethod
-    def weights_sum_to_one(cls, v, info):
+    def weights_sum_to_one(cls, v: float, info: Any) -> float:
         # Pydantic v2: info.data contains already-validated fields
         # We'll do a post-validation check instead
         return v
 
-    @model_validator(mode='after')
-    def check_sum(self):
-        total = (self.price_weight + self.lead_time_weight +
-                 self.esg_weight + self.reliability_weight)
+    @model_validator(mode="after")
+    def check_sum(self) -> "EvaluationWeights":
+        total = (
+            self.price_weight + self.lead_time_weight + self.esg_weight + self.reliability_weight
+        )
         if not (0.99 <= total <= 1.01):
             raise ValueError(f"Weights must sum to 1.0, got {total}")
         return self
+
 
 class MultiCriteriaEvaluator:
     """
@@ -33,8 +39,8 @@ class MultiCriteriaEvaluator:
     def __init__(
         self,
         weights: EvaluationWeights,
-        esg_baselines: Dict[str, float],
-    ):
+        esg_baselines: dict[str, float],
+    ) -> None:
         self.weights = weights
         self.esg_baselines = esg_baselines
 
@@ -56,15 +62,18 @@ class MultiCriteriaEvaluator:
         excess = lead_time_days - target_lead_time
         return max(0.0, 1.0 - (excess / max(target_lead_time, 1)))
 
-    def _score_esg(self, carbon_footprint_kg: float, material: str) -> float:
+    def _score_esg(self, carbon_footprint_kg: float, material: str, quantity: int = 1) -> float:
         """
-        ESG score: 1.0 at zero carbon, linear decay to baseline.
+        ESG score: 1.0 at zero per-unit carbon, linear decay to per-unit baseline.
         Above baseline, score = 0.0.
+        Carbon footprint is reported as total (kg CO2e for the whole order),
+        so it is normalized by quantity before comparison to the per-unit baseline.
         """
+        per_unit = carbon_footprint_kg / max(quantity, 1)
         baseline = self.esg_baselines.get(material, 2000.0)
         if baseline <= 0:
             return 1.0
-        return max(0.0, 1.0 - (carbon_footprint_kg / baseline))
+        return max(0.0, 1.0 - (per_unit / baseline))
 
     def _score_reliability(self, reliability_score: float) -> float:
         """Reliability score is already [0, 1]."""
@@ -72,38 +81,40 @@ class MultiCriteriaEvaluator:
 
     def score_bid(
         self,
-        bid,  # BidPayload object
+        bid: BidPayload,
         market_spot_price: float,
         target_lead_time: int,
         material: str,
+        quantity: int = 1,
     ) -> float:
         """Compute composite weighted score for a single bid."""
         p = self._score_price(bid.unit_price, market_spot_price)
         lt = self._score_lead_time(bid.lead_time_days, target_lead_time)
-        esg = self._score_esg(bid.carbon_footprint_kg, material)
+        esg = self._score_esg(bid.carbon_footprint_kg, material, quantity)
         rel = self._score_reliability(bid.reliability_score)
 
         total = (
-            self.weights.price_weight * p +
-            self.weights.lead_time_weight * lt +
-            self.weights.esg_weight * esg +
-            self.weights.reliability_weight * rel
+            self.weights.price_weight * p
+            + self.weights.lead_time_weight * lt
+            + self.weights.esg_weight * esg
+            + self.weights.reliability_weight * rel
         )
         return round(total, 4)
 
     def rank_bids(
         self,
-        bids: List,  # List[BidPayload]
+        bids: list[BidPayload],
         market_spot_price: float,
         target_lead_time: int,
         material: str,
-    ) -> List[tuple]:
+        quantity: int = 1,
+    ) -> list[tuple[float, BidPayload]]:
         """
         Score and rank bids descending by composite score.
         Returns: List[(score, bid)] sorted highest first.
         """
         scored = [
-            (self.score_bid(b, market_spot_price, target_lead_time, material), b)
+            (self.score_bid(b, market_spot_price, target_lead_time, material, quantity), b)
             for b in bids
         ]
         scored.sort(key=lambda x: x[0], reverse=True)

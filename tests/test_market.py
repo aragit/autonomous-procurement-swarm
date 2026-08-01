@@ -2,8 +2,7 @@
 Tests for market simulation.
 """
 
-import pytest
-from core.market_simulator import MarketSimulator, GeopoliticalRiskModel, RiskRegime
+from core.market_simulator import GeopoliticalRiskModel, MarketSimulator
 
 
 def test_market_simulator_creation():
@@ -15,7 +14,7 @@ def test_market_step():
     sim = MarketSimulator(seed=42)
     states = sim.step()
     assert len(states) == 6  # All materials
-    for material, state in states.items():
+    for _material, state in states.items():
         assert state.spot_price > 0
         assert 0 <= state.geo_risk <= 1
 

@@ -9,12 +9,10 @@ Supports three backends:
 The engine exposes an OpenAI-compatible chat completion API.
 """
 
-import os
 import json
-import time
 import random
+import time
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
 from dataclasses import dataclass
 
 
@@ -33,14 +31,14 @@ class BaseLLMEngine(ABC):
     @abstractmethod
     def chat_completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 512,
     ) -> LLMResponse:
         pass
 
     @abstractmethod
-    def shutdown(self):
+    def shutdown(self) -> None:
         pass
 
 
@@ -57,7 +55,7 @@ class MockLLMEngine(BaseLLMEngine):
 
     def chat_completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 512,
     ) -> LLMResponse:
@@ -111,78 +109,93 @@ class MockLLMEngine(BaseLLMEngine):
     def _extract_material(self, text: str) -> str:
         # Look for "Material: <value>" or extract from prompt context
         import re
+
         match = re.search(r"material:\s*(\w+)", text, re.IGNORECASE)
         if match:
             return match.group(1).lower()
         return "steel"  # fallback
 
-    def _generate_response(self, role: str, spot_price: float, geo_risk: float, material: str = "steel") -> str:
+    def _generate_response(
+        self, role: str, spot_price: float, geo_risk: float, material: str = "steel"
+    ) -> str:
         """Generate deterministic but realistic negotiation response."""
         if role == "buyer":
             # Buyer counters at 85-95% of spot, or accepts if price is low
             if spot_price > 0 and self.rng.random() > 0.3:
                 counter = round(spot_price * self.rng.uniform(0.85, 0.95), 2)
-                return json.dumps({
-                    "type": "counter",
-                    "material": material,
-                    "quantity": self.rng.choice([500, 1000, 2000]),
-                    "counter_price": counter,
-                    "justification": f"Market oversupply and {geo_risk:.0%} geopolitical risk warrants discount",
-                    "deadline": "2026-06-30"
-                })
+                return json.dumps(
+                    {
+                        "type": "counter",
+                        "material": material,
+                        "quantity": self.rng.choice([500, 1000, 2000]),
+                        "counter_price": counter,
+                        "justification": (
+                            f"Market oversupply and {geo_risk:.0%} geopolitical "
+                            "risk warrants discount"
+                        ),
+                        "deadline": "2026-06-30",
+                    }
+                )
             else:
-                return json.dumps({
-                    "type": "accept",
-                    "material": material,
-                    "quantity": 1000,
-                    "final_price": round(spot_price * 0.92, 2) if spot_price > 0 else 400.0,
-                    "delivery_date": "2026-07-15"
-                })
+                return json.dumps(
+                    {
+                        "type": "accept",
+                        "material": material,
+                        "quantity": 1000,
+                        "final_price": round(spot_price * 0.92, 2) if spot_price > 0 else 400.0,
+                        "delivery_date": "2026-07-15",
+                    }
+                )
 
         elif role == "seller":
             # Seller offers at 105-115% of spot, or counters higher
             if spot_price > 0 and self.rng.random() > 0.3:
                 offer = round(spot_price * self.rng.uniform(1.05, 1.15), 2)
-                return json.dumps({
-                    "type": "counter",
-                    "material": material,
-                    "quantity": self.rng.choice([500, 1000, 2000]),
-                    "counter_price": offer,
-                    "justification": f"Premium quality and supply chain resilience amid {geo_risk:.0%} risk",
-                    "deadline": "2026-06-25"
-                })
+                return json.dumps(
+                    {
+                        "type": "counter",
+                        "material": material,
+                        "quantity": self.rng.choice([500, 1000, 2000]),
+                        "counter_price": offer,
+                        "justification": (
+                            f"Premium quality and supply chain resilience amid {geo_risk:.0%} risk"
+                        ),
+                        "deadline": "2026-06-25",
+                    }
+                )
             else:
-                return json.dumps({
-                    "type": "offer",
-                    "material": material,
-                    "quantity": self.rng.choice([500, 1000, 2000]),
-                    "unit_price": round(spot_price * 1.10, 2) if spot_price > 0 else 500.0,
-                    "delivery_date": "2026-07-15",
-                    "payment_terms": "net_30"
-                })
+                return json.dumps(
+                    {
+                        "type": "offer",
+                        "material": material,
+                        "quantity": self.rng.choice([500, 1000, 2000]),
+                        "unit_price": round(spot_price * 1.10, 2) if spot_price > 0 else 500.0,
+                        "delivery_date": "2026-07-15",
+                        "payment_terms": "net_30",
+                    }
+                )
 
         elif role == "market":
             trend = "rising" if self.rng.random() > 0.5 else "falling"
-            return json.dumps({
-                "type": "report",
-                "material": material,
-                "spot_price": round(spot_price, 2) if spot_price > 0 else 450.0,
-                "trend": trend,
-                "volatility": round(self.rng.uniform(0.1, 0.4), 2),
-                "geo_risk": round(geo_risk, 2),
-                "supply_disruption": geo_risk > 0.6,
-                "recommendation": f"Consider hedging given {geo_risk:.0%} geopolitical risk"
-            })
+            return json.dumps(
+                {
+                    "type": "report",
+                    "material": material,
+                    "spot_price": round(spot_price, 2) if spot_price > 0 else 450.0,
+                    "trend": trend,
+                    "volatility": round(self.rng.uniform(0.1, 0.4), 2),
+                    "geo_risk": round(geo_risk, 2),
+                    "supply_disruption": geo_risk > 0.6,
+                    "recommendation": f"Consider hedging given {geo_risk:.0%} geopolitical risk",
+                }
+            )
 
         else:  # arbiter or unknown
-            return json.dumps({
-                "type": "validate",
-                "agent": "unknown",
-                "message_valid": True,
-                "errors": []
-            })
+            return json.dumps(
+                {"type": "validate", "agent": "unknown", "message_valid": True, "errors": []}
+            )
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         pass
 
 
@@ -196,12 +209,11 @@ class TransformersEngine(BaseLLMEngine):
         self,
         model_name: str = "Qwen/Qwen2.5-3B-Instruct",
         device: str = "cpu",
-    ):
+    ) -> None:
         print(f"[LLM] Loading {model_name} via Transformers (CPU)...")
-        print(f"[LLM] This will download ~6GB on first run. Go get coffee.")
+        print("[LLM] This will download ~6GB on first run. Go get coffee.")
         start = time.time()
 
-        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.model_name = model_name
@@ -211,14 +223,14 @@ class TransformersEngine(BaseLLMEngine):
             torch_dtype="auto",
             device_map=device,
         )
-        self.model.eval()
+        self.model.eval()  # type: ignore[no-untyped-call]
 
         load_time = time.time() - start
         print(f"[LLM] Model loaded in {load_time:.1f}s")
 
     def chat_completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 512,
     ) -> LLMResponse:
@@ -228,15 +240,13 @@ class TransformersEngine(BaseLLMEngine):
         text = self.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        model_inputs = self.tokenizer([text], return_tensors="pt").to(
-            self.model.device
-        )
+        model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
 
         input_ids = model_inputs.input_ids
         tokens_in = input_ids.shape[1]
 
         with torch.no_grad():
-            generated_ids = self.model.generate(
+            generated_ids = self.model.generate(  # type: ignore[misc]
                 **model_inputs,
                 max_new_tokens=max_tokens,
                 temperature=temperature,
@@ -245,24 +255,25 @@ class TransformersEngine(BaseLLMEngine):
                 eos_token_id=self.tokenizer.eos_token_id,
             )
 
-        tokens_out = generated_ids.shape[1] - tokens_in
-        response = self.tokenizer.decode(
-            generated_ids[0][tokens_in:], skip_special_tokens=True
-        )
+        tokens_out = int(generated_ids.shape[1]) - tokens_in  # type: ignore[union-attr]
+        response = self.tokenizer.decode(generated_ids[0][tokens_in:], skip_special_tokens=True)
+        # Tokenizer stubs type decode() as str | list[str]; normalize to str.
+        content = response.strip() if isinstance(response, str) else response[0].strip()
 
         latency_ms = (time.time() - start) * 1000
 
         return LLMResponse(
-            content=response.strip(),
+            content=content,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
             model=self.model_name,
         )
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         del self.model
         import torch
+
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
 
@@ -276,13 +287,13 @@ class VLLMEngine(BaseLLMEngine):
         self,
         model_name: str = "Qwen/Qwen2.5-3B-Instruct",
         tensor_parallel_size: int = 1,
-    ):
+    ) -> None:
         try:
             from vllm import LLM, SamplingParams
         except ImportError:
             raise ImportError(
                 "vLLM not installed. Use: VLLM_TARGET_DEVICE=cpu pip install vllm"
-            )
+            ) from None
 
         print(f"[LLM] Loading {model_name} via vLLM (CPU)...")
         start = time.time()
@@ -304,7 +315,7 @@ class VLLMEngine(BaseLLMEngine):
 
     def chat_completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 512,
     ) -> LLMResponse:
@@ -334,7 +345,7 @@ class VLLMEngine(BaseLLMEngine):
             model=self.model_name,
         )
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         pass
 
 
