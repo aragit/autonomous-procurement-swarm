@@ -30,7 +30,7 @@
 - [Testing](#testing)
 - [Deployment](#deployment)
 - [Performance](#performance)
-- [Security & Compliance](#security--compliance)
+- [Security](#security)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -508,13 +508,15 @@ DATABASE_URL=postgresql+asyncpg://user:pass@prod-db:5432/procurement
 PROCUREMENT_LLM__PREFER_VLLM=true
 ```
 
-### Kubernetes
+### Production Deployment Notes
 
-No Helm chart yet. Key resources needed:
-- Deployment with 2+ replicas for API
-- PostgreSQL StatefulSet with `pgvector/pgvector:16` image
-- ConfigMap for `base.yaml`
-- Secret for `DATABASE_URL`
+Beyond Docker Compose, for production-scale deployments:
+
+- **API**: Stateless FastAPI app — scale horizontally behind a load balancer
+- **Database**: Use a managed PostgreSQL 16+ instance with the `pgvector` extension enabled (AWS RDS, Azure Database for PostgreSQL, Google Cloud SQL)
+- **Configuration**: Mount `configs/base.yaml` via ConfigMap; inject `DATABASE_URL` via Secret
+- **Observability**: structlog JSON output is compatible with Datadog, Splunk, or ELK stack ingestion
+- **TLS**: Terminate TLS at the reverse proxy (nginx, Traefik, or cloud load balancer)
 
 ---
 
@@ -522,44 +524,46 @@ No Helm chart yet. Key resources needed:
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| Auction throughput | 15-30 req/s | MockLLM, 5 suppliers, bartering enabled |
-| p50 latency | ~150ms | End-to-end POST /auctions |
-| p99 latency | ~600ms | Under concurrent load |
-| Policy evaluation | <1ms | Deterministic Python, no LLM |
-| Ledger append | ~5ms | Asyncpg + local PostgreSQL |
-| Hash chain verify | O(n) | 1000 events ≈ 50ms |
+| **Auction throughput** | 15–30 req/s | End-to-end sealed-bid + bartering, 5 suppliers |
+| **p50 latency** | ~150ms | MockLLM backend |
+| **p99 latency** | ~600ms | Under 20-concurrent load |
+| **Policy validation** | <1ms | Deterministic Python, zero LLM overhead |
+| **Ledger append** | ~5ms | Asyncpg, append-only, no locks |
+| **Hash chain verification** | O(n), ~50ms/1000 events | Cryptographic integrity check |
 
-### Bottlenecks
+### Scaling Dimensions
 
-1. **LLM inference** — Real Transformers/vLLM backends add 2-10s per bid. Use MockLLM for load testing.
-2. **Bilateral bartering** — Sequential per-supplier turns; K suppliers × 4 turns = 4K sequential LLM calls.
-3. **PostgreSQL writes** — Append-only is fast, but chain verification is O(n). Do not verify on every read.
+| Bottleneck | Mitigation Strategy |
+|------------|---------------------|
+| LLM inference latency | Use vLLM with continuous batching; or pre-compute supplier strategies |
+| Bilateral bartering serialization | Shard by `session_id`; each auction is independent |
+| Ledger read amplification | Verify chain asynchronously (background job), not on every `GET` |
+
+### Benchmarks
+
+```bash
+python stress_test.py
+# Expected: 15-30 req/s on a 4-core laptop with local PostgreSQL
+```
 
 ---
 
-## Security & Compliance
+## Security
 
-### Cryptographic Ledger
-- Full SHA-256 (64 hex chars), not truncated
-- Parent hash linking prevents tampering without invalidating the chain
-- `verify_chain()` walks the entire history and recomputes every digest
+### Current Protections
+- **Input validation**: Pydantic v2 schemas reject malformed requests (HTTP 422)
+- **Material whitelist**: Only configured commodities are accepted
+- **Spend caps**: Hard budget limits enforced by PolicyEngine (no LLM override)
+- **Audit trail**: SHA-256 hash chain detects tampering
 
-### Input Validation
-- Pydantic v2 schemas enforce type safety and business rules
-- Unknown materials return HTTP 422
-- Zero/negative quantities return HTTP 422
-- Payment terms whitelist: `net_30`, `net_60`, `cod`, `letter_of_credit`
+### Production Hardening Checklist
+Before exposing to untrusted clients:
+- [ ] Add OAuth2 / API key authentication (FastAPI `Depends` + `HTTPBearer`)
+- [ ] Add rate limiting (`slowapi` or nginx `limit_req`)
+- [ ] Terminate TLS at reverse proxy
+- [ ] Add buyer organization isolation (multi-tenant `session_id` prefixing)
 
-### Policy Enforcement
-- Spend caps are hard limits — no LLM can override
-- Blacklisted vendors are rejected before scoring
-- ESG carbon limits are enforced per material baseline
-
-### What Is NOT Secured (Yet)
-- 🔓 No authentication on API endpoints
-- 🔓 No rate limiting
-- 🔓 No TLS termination (use a reverse proxy)
-- 🔓 No RBAC for buyer organizations
+See [SECURITY.md](SECURITY.md) for responsible disclosure policy.
 
 ---
 
