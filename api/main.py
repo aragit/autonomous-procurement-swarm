@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from configs.settings import settings
 from core.agents.buyer import BuyerOrchestrator
@@ -64,11 +64,19 @@ app = FastAPI(
 
 class AuctionRequest(BaseModel):
     material: str = "steel"
-    quantity: int = 1000
+    quantity: int = Field(default=1000, gt=0)
     max_unit_price: float | None = None
     target_lead_time_days: int = 30
-    supplier_count: int = 5
+    supplier_count: int = Field(default=5, gt=0)
     enable_bartering: bool = True
+
+    @field_validator("material")
+    @classmethod
+    def validate_material(cls, v: str) -> str:
+        valid = settings.negotiation.valid_materials
+        if v not in valid:
+            raise ValueError(f"material must be one of {valid} (got '{v}')")
+        return v
 
 
 class AuctionResponse(BaseModel):
