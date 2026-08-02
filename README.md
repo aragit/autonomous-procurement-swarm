@@ -11,7 +11,6 @@
     <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
     <img src="https://img.shields.io/badge/fastapi-0.110%2B-009688" alt="FastAPI">
     <img src="https://img.shields.io/badge/postgres-16-336791" alt="PostgreSQL 16">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
 </p>
 
@@ -624,6 +623,7 @@ We welcome contributions! Please follow these guidelines:
 - **Pydantic**: All data schemas use Pydantic v2
 - **Logging**: Use `structlog`, never `print()`
 - **Tests**: All new features require unit tests; API changes require integration tests
+
 
 ---
 
