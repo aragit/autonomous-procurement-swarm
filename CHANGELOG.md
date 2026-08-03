@@ -4,7 +4,7 @@ Release history for the Autonomous Procurement Swarm. Tags follow a phase-driven
 `v0.x` scheme; `v0.2` was intentionally skipped — its concerns (Swarm Foundation)
 and (Procurement Agent Architecture) were delivered together in `v0.1`.
 
-## v0.6 — Governance + Risk-Aware Procurement (commit TBD)
+## v0.6 — Governance + Risk-Aware Procurement (73ce35c)
 
 Added:
 - Deterministic risk assessment layer (`RiskAssessmentAgent`, `RiskAssessmentArtifact`):
