@@ -16,6 +16,7 @@ in parallel and to the completion events to know when a phase is fully done.
 from enum import StrEnum
 
 CREATE_REQUIREMENT_INTENT = "CreateRequirement"
+RECORD_OUTCOME_INTENT = "RecordProcurementOutcome"
 
 
 class ProcurementEventType(StrEnum):
@@ -29,3 +30,5 @@ class ProcurementEventType(StrEnum):
     EVALUATION_COMPLETED = "EvaluationCompleted"
     QUOTES_COMPLETED = "QuotesCompleted"
     DECISION_MADE = "DecisionMade"
+    OUTCOME_RECORDED = "OutcomeRecorded"
+    SUPPLIER_PERFORMANCE_UPDATED = "SupplierPerformanceUpdated"

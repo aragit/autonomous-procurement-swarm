@@ -150,29 +150,39 @@ INIT → OFFER_RECEIVED → COUNTER_SENT → OFFER_RECEIVED → ACCEPTED
 
 The repository also ships a self-contained **swarm runtime** (`swarm/`) as the
 foundation for autonomous multi-agent procurement. It is intentionally
-deterministic and rule-based — no planning, no LLM. A **domain layer**
-(`swarm/domain/`) adapts the existing `core/` procurement logic (RFQ
-normalization, market simulation, multi-criteria scoring, the policy engine)
-into five agents that cooperate over the event bus.
+deterministic and rule-based — no planning, no LLM, no autonomous learning. A
+**domain layer** (`swarm/domain/`) adapts the existing `core/` procurement logic
+(RFQ normalization, market simulation, multi-criteria scoring, the policy
+engine) into domain agents that cooperate over the event bus.
 
-The flow is **parallel and per-supplier** (Phase 3): discovery announces each
-supplier individually, evaluation and negotiation run one specialized step per
-supplier, and a completion tracker gates the decision until every expected
-evaluation and quote artifact exists.
+The current flow is **parallel, per-supplier, and strategy-driven** (Phases 3–5):
+discovery announces each supplier individually, evaluation and negotiation run
+one specialized step per supplier, a completion tracker gates the decision
+until every expected evaluation and quote artifact exists, the strategy agent
+picks a deterministic scoring strategy before any supplier is discovered, and the
+outcome + supplier-intelligence agents close a deterministic feedback loop that
+improves future evaluations — all through artifacts and events on a single
+`correlation_id`.
 
 ```mermaid
 flowchart LR
     USER[User Request] --> SWARM[Swarm facade]
     SWARM -->|CreateRequirement message| RA[RequirementAgent]
     RA -->|RequirementCreated event| BUS[Event Bus]
-    BUS --> SDA[SupplierDiscoveryAgent]
+    BUS --> ST[StrategyAgent]
+    ST -->|StrategySelected event| SDA[SupplierDiscoveryAgent]
     SDA -->|SupplierDiscovered x5| EAV[EvaluationAgent]
     EAV -->|SupplierEvaluated x5| NA[NegotiationAgent]
     NA -->|QuoteGenerated x5| BUS
     EAV --> CT[CompletionTracker]
     NA --> CT
     CT -->|QuotesCompleted| DA[DecisionAgent]
-    RA --> STATE[(Shared SwarmState)]
+    DA -->|DecisionMade| STATE[(Shared SwarmState)]
+    STATE -.->|OutcomeRecorded message| OA[OutcomeAgent]
+    OA -->|OutcomeRecorded event| SIA[SupplierIntelligenceAgent]
+    SIA -->|SupplierPerformanceUpdated| SM[(SupplierMemoryStore)]
+    SM -.->|history| EAV
+    RA --> STATE
     SDA --> STATE
     EAV --> STATE
     NA --> STATE
@@ -192,8 +202,9 @@ A more detailed walkthrough — including sequence diagrams and the hardening
 guarantees (`correlation_id`, event replay, capability schema, structured
 logging) — lives in [docs/swarm-architecture.md](docs/swarm-architecture.md).
 
-Phase 3 demo — one `CreateRequirement` message fans out through the five
-deterministic agents to a final supplier decision:
+Phase 3–5 demo — one `CreateRequirement` message fans out through the six
+deterministic agents to a final supplier decision, optionally followed by an
+outcome record that seeds the supplier performance memory:
 
 ```bash
 python -m examples.procurement_swarm_demo
@@ -202,18 +213,28 @@ python -m examples.procurement_swarm_demo
 1. A `CreateRequirement` message reaches the swarm and the requirement agent
    normalizes it (RFQ defaults, market-derived price cap) into a requirement
    artifact, then announces `RequirementCreated`.
-2. The supplier discovery agent perceives that event, samples the deterministic
-   market (`MarketSimulator(seed=42)`), declares the expected evaluation/quote
-   counts, publishes the five-supplier pool and announces one
+2. The strategy agent picks a deterministic scoring strategy (`cost_optimized`,
+   `balanced` or `low_carbon`) from the requirement's constraints and announces
+   `StrategySelected`.
+3. The supplier discovery agent (gated on `StrategySelected`) samples the
+   deterministic market (`MarketSimulator(seed=42)`), declares the expected
+   evaluation/quote counts, publishes the five-supplier pool and announces one
    `SupplierDiscovered` event per supplier.
-3. Each `SupplierDiscovered` is routed to the evaluation agent, which scores
-   that supplier and announces `SupplierEvaluated`; the negotiation agent turns
-   each evaluation into a deterministic `QuoteGenerated`. The `CompletionTracker`
-   fires `EvaluationCompleted` / `QuotesCompleted` once every expected artifact
-   for the conversation exists.
-4. The decision agent reacts only to `QuotesCompleted`, filters the quotes
-   through the policy engine and picks the winner — all within one
+4. Each `SupplierDiscovered` is routed to the evaluation agent, which scores
+   that supplier — blending the strategy weights with optional supplier-history
+   from the `SupplierMemoryStore` — and announces `SupplierEvaluated`; the
+   negotiation agent turns each evaluation into a deterministic
+   `QuoteGenerated`. The `CompletionTracker` fires `EvaluationCompleted` /
+   `QuotesCompleted` (once, idempotently) once every expected artifact for the
+   conversation exists.
+5. The decision agent reacts only to `QuotesCompleted`, filters the quotes
+   through the policy engine and picks the winner, then emits a
+   `DecisionExplanationArtifact` explaining *why*. All within one
    `correlation_id`.
+6. A `RecordProcurementOutcome` message records what actually happened; the
+   outcome agent writes an `OutcomeArtifact` (lineaged to the `DecisionArtifact`)
+   and the supplier-intelligence agent folds it into a deterministic
+   `SupplierPerformanceArtifact` — visible to future evaluations.
 
 The `Swarm` facade exposes the read-only execution trace:
 
@@ -239,8 +260,14 @@ Tests: `tests/unit/test_agent.py`, `tests/unit/test_event.py`,
 `tests/unit/test_swarm_core.py`, `tests/unit/test_completion.py`,
 `tests/unit/test_requirement_agent.py`, `tests/unit/test_supplier_agent.py`,
 `tests/unit/test_evaluation_agent.py`, `tests/unit/test_negotiation_agent.py`,
-`tests/unit/test_decision_agent.py`,
-`tests/unit/test_full_procurement_flow.py`.
+`tests/unit/test_decision_agent.py`, `tests/unit/test_full_procurement_flow.py`,
+`tests/unit/test_strategy_selection.py`,
+`tests/unit/test_weighted_evaluation.py`,
+`tests/unit/test_decision_explanation.py`,
+`tests/unit/test_supplier_memory.py`, `tests/unit/test_outcome_agent.py`,
+`tests/unit/test_supplier_intelligence.py`,
+`tests/unit/test_supplier_history_evaluation.py`, and
+`tests/integration/test_feedback_cycle.py`.
 
 ---
 
@@ -529,8 +556,9 @@ Find behaviorally similar suppliers via pgvector.
 
 ### `POST /swarm/requirements`
 
-Dispatch a requirement into the deterministic Phase 3 swarm (no LLM) and run
-the full parallel flow to a decision.
+Dispatch a requirement into the deterministic swarm (no LLM, no planner) and run
+the full parallel flow to a decision. Pass an optional `max_carbon_per_unit` to
+select the low-carbon strategy.
 
 **Request:**
 ```json
@@ -538,7 +566,8 @@ the full parallel flow to a decision.
   "material": "aluminum",
   "quantity": 1000,
   "budget": 2000000.0,
-  "target_lead_time_days": 30
+  "target_lead_time_days": 30,
+  "max_carbon_per_unit": 800.0
 }
 ```
 
@@ -551,9 +580,59 @@ the full parallel flow to a decision.
     "selected_supplier": "MinerCorp_A",
     "ranked": [{"supplier_id": "MinerCorp_A", "score": 0.858, "price": 984.0}]
   },
+  "explanation": {
+    "strategy_used": "low_carbon",
+    "top_factors": ["Selection followed the low_carbon strategy..."],
+    "rejected_suppliers": [
+      {"supplier_id": "DistribCorp_B", "reason": "Lower composite score than the selected supplier"}
+    ]
+  },
   "completions": {"REQ-3F9A2C1B-CONV": ["evaluation", "quote"]},
   "event_count": 31,
   "artifact_count": 12
+}
+```
+
+### `POST /swarm/{request_id}/outcome`
+
+Feed a post-decision outcome back into the deterministic in-memory supplier
+memory. The `decision_id` lineage anchor is resolved from the remembered run.
+
+**Request:**
+```json
+{
+  "supplier_id": "MinerCorp_A",
+  "delivered_on_time": true,
+  "quality_score": 0.92,
+  "actual_price": 984.0,
+  "carbon_score": 1800.0
+}
+```
+
+### `GET /swarm/explanation/{request_id}`
+
+Human-readable decision explanation artifact (strategy used, top factors, and
+why each other supplier was rejected).
+
+### `GET /swarm/supplier/{supplier_id}/performance`
+
+### `GET /swarm/supplier/{supplier_id}/performance`
+
+Deterministic supplier performance summary (order count, delivery/quality/price
+competitiveness/carbon averages) from the in-memory `SupplierMemoryStore`.
+
+**Response:**
+```json
+{
+  "supplier_id": "MinerCorp_A",
+  "performance": {
+    "total_orders": 15,
+    "successful_orders": 14,
+    "delivery_score": 0.94,
+    "quality_score": 0.91,
+    "price_competitiveness": 0.99,
+    "carbon_score": 1800.0
+  }
 }
 ```
 

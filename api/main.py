@@ -21,8 +21,9 @@ from core.memory.semantic import PgVectorMemoryStore
 from core.protocol.auction_orchestrator import AuctionOrchestrator
 from core.protocol.policy_engine import PolicyContext, PolicyEngine
 from swarm import SwarmState
-from swarm.domain.events import CREATE_REQUIREMENT_INTENT
+from swarm.domain.events import CREATE_REQUIREMENT_INTENT, RECORD_OUTCOME_INTENT
 from swarm.domain.wiring import build_procurement_swarm
+from swarm.memory import default_store
 
 # Configure logging at import time
 configure_logging()
@@ -41,6 +42,11 @@ shared_vector_store: PgVectorMemoryStore | None = None
 # Read-only swarm trace store: most recent wired-swarm executions by request_id.
 swarm_states: dict[str, SwarmState] = {}
 MAX_SWARM_STATES = 50
+
+# Deterministic, in-memory supplier performance shared across requests (Phase 5).
+# No external database: history is append-only and reproducible from the
+# recorded outcome sequence.
+supplier_memory = default_store
 
 
 @asynccontextmanager
@@ -323,6 +329,7 @@ async def dispatch_swarm_requirement(
     swarm = build_procurement_swarm(
         request_id=request_id,
         goal=request.goal or f"Source {request.quantity} units of {request.material}",
+        supplier_memory=supplier_memory,
     )
     await swarm.start()
     correlation_id = f"{request_id}-CONV"
@@ -383,6 +390,80 @@ async def get_swarm_state(request_id: str) -> dict[str, Any]:
     """Full serialized read-only snapshot of a swarm run's state."""
     state = _swarm_state(request_id)
     return state.to_dict()
+
+
+class OutcomeRecordRequest(BaseModel):
+    """A post-decision procurement outcome fed back into supplier memory."""
+
+    supplier_id: str = Field(..., min_length=1)
+    delivered_on_time: bool = True
+    quality_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    actual_price: float = Field(..., gt=0)
+    carbon_score: float = Field(default=0.0, ge=0.0)
+
+
+@app.post("/swarm/{request_id}/outcome")
+async def record_swarm_outcome(request_id: str, request: OutcomeRecordRequest) -> dict[str, Any]:
+    """Feed a post-decision outcome back into the deterministic supplier memory.
+
+    Replays the original decision (looked up by request id) as the
+    ``decision_id`` lineage anchor, runs the outcome through an ephemeral swarm
+    that shares the in-memory supplier store, and returns the updated supplier
+    performance. No external database is written; memory is the module-level
+    :data:`swarm.memory.default_store`.
+    """
+    state = _swarm_state(request_id)
+    decision = state.get_artifact("decision")
+    if decision is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No decision recorded for request_id {request_id}",
+        )
+    decision_id = str(decision.id)
+
+    correlation_id = f"{request_id}-OUTCOME"
+    swarm = build_procurement_swarm(
+        request_id=request_id, goal=f"Record outcome for {request.supplier_id}",
+        supplier_memory=supplier_memory,
+    )
+    await swarm.start()
+    await swarm.send_message(
+        RECORD_OUTCOME_INTENT,
+        {
+            "decision_id": decision_id,
+            "supplier_id": request.supplier_id,
+            "delivered_on_time": request.delivered_on_time,
+            "quality_score": request.quality_score,
+            "actual_price": request.actual_price,
+            "carbon_score": request.carbon_score,
+        },
+        sender="user",
+        correlation_id=correlation_id,
+    )
+    await swarm.shutdown()
+    _remember(swarm.state)
+
+    outcomes = swarm.state.find_artifacts(kind="procurement_outcome", correlation_id=correlation_id)
+    performance = supplier_memory.get_supplier_performance(request.supplier_id)
+    return {
+        "request_id": request_id,
+        "correlation_id": correlation_id,
+        "decision_id": decision_id,
+        "outcome": outcomes[0].data if outcomes else None,
+        "supplier_performance": performance.to_summary() if performance else None,
+    }
+
+
+@app.get("/swarm/supplier/{supplier_id}/performance")
+async def get_supplier_performance(supplier_id: str) -> dict[str, Any]:
+    """Deterministic supplier performance summary from in-memory supplier memory."""
+    performance = supplier_memory.get_supplier_performance(supplier_id)
+    if performance is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No performance record for supplier {supplier_id}",
+        )
+    return {"supplier_id": supplier_id, "performance": performance.to_summary()}
 
 
 @app.get("/swarm/explanation/{request_id}")

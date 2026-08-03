@@ -31,11 +31,14 @@ from swarm.domain.agents import (
     DecisionAgent,
     EvaluationAgent,
     NegotiationAgent,
+    OutcomeAgent,
     RequirementAgent,
     StrategyAgent,
     SupplierDiscoveryAgent,
+    SupplierIntelligenceAgent,
 )
 from swarm.domain.events import ProcurementEventType
+from swarm.memory import SupplierMemoryStore
 
 COMPLETION_EVENTS = {
     "evaluation": ProcurementEventType.EVALUATION_COMPLETED,
@@ -59,7 +62,12 @@ def _select_evaluator(swarm: Swarm) -> Callable[[Event], BaseAgent | None]:
     return select
 
 
-def build_procurement_swarm(*, request_id: str = "", goal: str = "") -> Swarm:
+def build_procurement_swarm(
+    *,
+    request_id: str = "",
+    goal: str = "",
+    supplier_memory: SupplierMemoryStore | None = None,
+) -> Swarm:
     """Create a wired procurement swarm with completion tracking enabled."""
     swarm = Swarm(request_id=request_id, goal=goal)
     tracker = CompletionTracker(
@@ -70,6 +78,9 @@ def build_procurement_swarm(*, request_id: str = "", goal: str = "") -> Swarm:
     swarm.bus.subscribe(ANY_EVENT, tracker.handler)
     swarm.tracker = tracker  # type: ignore[attr-defined]
 
+    memory = supplier_memory if supplier_memory is not None else SupplierMemoryStore()
+    swarm.supplier_memory = memory  # type: ignore[attr-defined]
+
     swarm.register(RequirementAgent(), event_types=[SwarmEventType.MESSAGE])
     swarm.register(
         StrategyAgent(),
@@ -79,8 +90,10 @@ def build_procurement_swarm(*, request_id: str = "", goal: str = "") -> Swarm:
         SupplierDiscoveryAgent(),
         event_types=[ProcurementEventType.STRATEGY_SELECTED],
     )
+    evaluation_agent = EvaluationAgent()
+    evaluation_agent.memory = memory
     swarm.register(
-        EvaluationAgent(),
+        evaluation_agent,
         event_types=[ProcurementEventType.SUPPLIER_DISCOVERED],
         route=_select_evaluator(swarm),
     )
@@ -91,5 +104,14 @@ def build_procurement_swarm(*, request_id: str = "", goal: str = "") -> Swarm:
     swarm.register(
         DecisionAgent(),
         event_types=[ProcurementEventType.QUOTES_COMPLETED],
+    )
+    swarm.register(
+        OutcomeAgent(),
+        event_types=[SwarmEventType.MESSAGE],
+    )
+    intelligence_agent = SupplierIntelligenceAgent(memory=memory)
+    swarm.register(
+        intelligence_agent,
+        event_types=[ProcurementEventType.OUTCOME_RECORDED],
     )
     return swarm

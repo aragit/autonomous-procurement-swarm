@@ -15,6 +15,8 @@ SUPPLIER_LIST_ARTIFACT_NAME = "suppliers"
 STRATEGY_ARTIFACT_NAME = "strategy"
 DECISION_ARTIFACT_NAME = "decision"
 DECISION_EXPLANATION_ARTIFACT_NAME = "decision_explanation"
+OUTCOME_ARTIFACT_NAME = "outcome"
+SUPPLIER_PERFORMANCE_ARTIFACT_NAME = "supplier_performance"
 
 
 def evaluation_artifact_name(supplier_id: str) -> str:
@@ -202,3 +204,66 @@ class DecisionExplanationArtifact(Artifact):
 
     kind: Literal["decision_explanation"] = "decision_explanation"
     name: str = DECISION_EXPLANATION_ARTIFACT_NAME
+
+
+def outcome_artifact_name(decision_id: str) -> str:
+    """Stable artifact name for an outcome tied to a decision."""
+    return f"outcome_{decision_id}"
+
+
+def supplier_performance_artifact_name(supplier_id: str) -> str:
+    """Stable artifact name for one supplier's performance record."""
+    return f"performance_{supplier_id}"
+
+
+class OutcomeArtifact(Artifact):
+    """A post-decision procurement outcome recorded after delivery.
+
+    Published by :class:`OutcomeAgent` and consumed by
+    :class:`SupplierIntelligenceAgent` to update supplier memory. Its
+    ``parent_ids`` reference the originating :class:`DecisionArtifact` (by id),
+    preserving lineage through the feedback loop.
+
+    ``data`` contract::
+
+        {
+            "supplier_id": str,
+            "decision_id": str,            # DecisionArtifact.id (uuid)
+            "delivered_on_time": bool,
+            "quality_score": float,        # 0..1
+            "actual_price": float,         # per-unit, currency
+            "carbon_score": float,          # per-unit kg CO₂
+        }
+    """
+
+    kind: Literal["procurement_outcome"] = "procurement_outcome"
+    name: str = OUTCOME_ARTIFACT_NAME
+
+
+class SupplierPerformanceArtifact(Artifact):
+    """A supplier's cumulative performance record as a first-class artifact.
+
+    Produced by :class:`SupplierIntelligenceAgent` from
+    :class:`OutcomeArtifact`s and read by :class:`EvaluationAgent` to apply a
+    deterministic history adjustment. Its ``parent_ids`` reference the
+    :class:`OutcomeArtifact` that produced it.
+
+    ``data`` contract::
+
+        {
+            "supplier_id": str,
+            "performance_metrics": {         # running averages
+                "total_orders": int,
+                "successful_orders": int,
+                "average_delivery_score": float,
+                "average_quality_score": float,
+                "average_price_competitiveness": float,
+                "average_carbon_score": float,
+            },
+            "order_count": int,
+            "updated_at": str,               # ISO-8601 UTC
+        }
+    """
+
+    kind: Literal["supplier_performance"] = "supplier_performance"
+    name: str = SUPPLIER_PERFORMANCE_ARTIFACT_NAME

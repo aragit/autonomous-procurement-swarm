@@ -14,6 +14,11 @@ Phase 4: the composite score is blended with the strategy weights from the
 :class:`StrategyArtifact` (price / score / carbon). The ``balanced`` strategy
 reproduces the Phase 3 scoring exactly; when no strategy artifact exists the
 balanced strategy is assumed (unit tests, direct drives).
+
+Phase 5: the composite is further adjusted by the supplier's deterministic
+history (:class:`SupplierMemoryStore`): strong reliability raises the score and
+poor reliability lowers it. When no supplier memory is attached, or the supplier
+has no recorded history, the adjustment is zero and Phase 4 scores are unchanged.
 """
 
 from typing import Any, cast
@@ -35,6 +40,7 @@ from swarm.domain.artifacts import (
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.pricing import bid_bond_amount, carbon_footprint, floor_price, lead_time_days
 from swarm.domain.strategy import BALANCED_STRATEGY, DEFAULT_STRATEGIES, Strategy
+from swarm.memory import SupplierMemoryStore
 
 logger = structlog.get_logger(__name__)
 
@@ -58,8 +64,9 @@ class EvaluationAgent(BaseAgent):
         *,
         weights: EvaluationWeights | None = None,
         esg_baselines: dict[str, float] | None = None,
+        memory: Any = None,
     ) -> None:
-        super().__init__()
+        super().__init__(memory=memory)
         self._evaluator = MultiCriteriaEvaluator(
             weights=weights or EvaluationWeights(),
             esg_baselines=(
@@ -116,12 +123,17 @@ class EvaluationAgent(BaseAgent):
         reliability = self._evaluator._score_reliability(bid.reliability_score)
         quality = self._quality_score(lead_time, reliability)
 
-        score = round(
+        base_score = round(
             strategy.price_weight * price
             + strategy.score_weight * quality
             + strategy.carbon_weight * esg,
             4,
         )
+        history = self._supplier_history(state)
+        adjustment = (
+            SupplierMemoryStore.history_adjustment(history) if history is not None else 0.0
+        )
+        score = round(max(0.0, min(1.0, base_score + adjustment)), 4)
         breakdown = {
             "price": price,
             "lead_time": lead_time,
@@ -136,6 +148,14 @@ class EvaluationAgent(BaseAgent):
             "strategy": {
                 "strategy_name": strategy.name,
                 "weights": strategy.as_weights(),
+            },
+            "history": {
+                "applied": history is not None,
+                "adjustment": adjustment,
+                "reliability": (
+                    round(history.delivery_reliability, 4) if history is not None else None
+                ),
+                "total_orders": history.total_orders if history is not None else 0,
             },
             "bid": bid.model_dump(),
         }
@@ -158,6 +178,17 @@ class EvaluationAgent(BaseAgent):
         return (
             self._lead_time_weight * lead_time + self._reliability_weight * reliability
         ) / self._quality_weight_total
+
+    def _supplier_history(self, state: SwarmState) -> Any:
+        """The supplier's performance record from the attached memory store.
+
+        Returns ``None`` (→ zero adjustment, Phase 4 behavior) when no memory
+        store is attached or the supplier has no recorded history.
+        """
+        memory = getattr(self, "memory", None)
+        if not isinstance(memory, SupplierMemoryStore):
+            return None
+        return memory.get_supplier_performance(self._supplier_id)
 
     @staticmethod
     def _read_strategy(state: SwarmState) -> Strategy:

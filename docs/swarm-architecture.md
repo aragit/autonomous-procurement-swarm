@@ -4,25 +4,28 @@ The swarm runtime (`swarm/`) is the architectural spine for autonomous
 multi-agent procurement. This document describes its layers, the data flow of a
 single request, and where it is heading.
 
-> **Status:** Phase 4 — deterministic execution strategies + auditable decision
-> explanations on the parallel procurement flow. The runtime is intentionally
-> deterministic — no planning, no LLM integration — and the domain agents run the
-> procurement flow end to end with completion-tracked, parallel per-supplier
-> steps. Strategy selection and decision rationale are explicit, seed-based
-> artifacts (no LLM). A planner (and any LLM usage) remains explicitly out of
-> scope.
+> **Status:** Phase 5 — parallel, per-supplier procurement flow with deterministic
+> execution strategies and an auditable supplier-intelligence feedback loop on the
+> deterministic runtime spine. The runtime is intentionally deterministic — no
+> planning, no LLM integration, no autonomous learning — and the domain agents run
+> the procurement flow end to end with completion-tracked, parallel per-supplier
+> steps. Strategy selection, outcome feedback and supplier memory are explicit,
+> seed-based artifacts (no LLM, no embeddings, no vector DB). A planner (and any
+> LLM usage) remains explicitly out of scope.
 
 ## Layer overview
 
 ```mermaid
 flowchart TB
-    subgraph Agents["Agents (Phase 4)"]
+    subgraph Agents["Agents (Phase 5)"]
         RA[RequirementAgent]
         SA[StrategyAgent]
         SDA[SupplierDiscoveryAgent]
         EA[EvaluationAgent]
         NA[NegotiationAgent]
         DA[DecisionAgent]
+        OA[OutcomeAgent]
+        SIA[SupplierIntelligenceAgent]
     end
 
     subgraph Orchestration["Orchestration"]
@@ -35,7 +38,7 @@ flowchart TB
 
     subgraph State["Shared State"]
         A[(SwarmState)]
-        AR[Artifacts: requirement / strategy / supplier_list / evaluation / quote / decision / decision_explanation]
+        AR[Artifacts: requirement / strategy / supplier_list / evaluation / quote / decision / decision_explanation / procurement_outcome / supplier_performance]
         EV[Event history]
         RS[Results + completions]
     end
@@ -73,6 +76,8 @@ flowchart TB
 | **Domain artifacts** | `swarm/domain/artifacts.py` | Requirement / strategy / supplier list / evaluation / quote / decision / decision-explanation artifacts with documented data contracts and `parent_ids` lineage |
 | **Pricing helpers** | `swarm/domain/pricing.py` | Deterministic floor price, lead time, carbon, bid bond (mirrors `core.agents.supplier` rules) |
 | **Domain agents** | `swarm/domain/agents/` | `RequirementAgent`, `StrategyAgent`, `SupplierDiscoveryAgent`, `EvaluationAgent`, `NegotiationAgent`, `DecisionAgent` — pure adapters over the existing `core/` logic |
+| **Wiring** | `swarm/domain/wiring.py` | `build_procurement_swarm(..., supplier_memory=...)` — registers all agents + tracker with the Phase 5 subscriptions and strategy-weighted routing; accepts a shared `SupplierMemoryStore` |
+| **Supplier memory** | `swarm/memory/supplier.py` | Deterministic, in-memory `SupplierMemoryStore` + module-level `default_store`; `update_from_outcome` maintains running averages, `history_adjustment` maps reliability to a score delta |
 | **Strategies** | `swarm/domain/strategy.py` | `Strategy` (price / score / carbon weights summing to 1.0) with `DEFAULT_STRATEGIES` (`cost_optimized`, `balanced`, `low_carbon`) and deterministic `select_strategy(constraints)` |
 
 ## Request flow
@@ -242,7 +247,6 @@ This keeps the runtime deterministic and LLM-free while making *what* is
 optimized and *why* it was chosen explicit and traceable through the same
 artifact/event lineage.
 
-## Phase 2 data flow
 - **Completion tracking** — `SwarmState.expect_artifact(kind, count=..., correlation_id=...)`
   declares group sizes; `CompletionTracker` (subscribed to every event, ignoring
   replayed ones) closes a group once the expected artifact count exists and
@@ -253,12 +257,43 @@ artifact/event lineage.
   trail (artifact creation + event publication per agent, runtime-sourced events
   filtered) from canonical state and never mutates it.
 
+## Phase 5: deterministic supplier intelligence and outcome feedback
+
+Phase 4 answered *what to optimize* and *why a supplier won*. Phase 5 makes the
+swarm learn from the outcome **deterministically** — closing the loop from
+`DecisionArtifact` → `ProcurementOutcome` → `SupplierPerformance`, without any
+LLM and without breaking Phase 4's scores.
+
+- **Outcome capture** — `OutcomeAgent` handles `RecordProcurementOutcome`,
+  validates the payload against the remembered decision, and writes an
+  `OutcomeArtifact` parented to that `DecisionArtifact.id` (lineage:
+  `DecisionArtifact.id` → `OutcomeArtifact.parent_ids` →
+  `SupplierPerformanceArtifact.parent_ids`).
+- **Supplier memory** — `SupplierIntelligenceAgent` reacts to `OutcomeRecorded`,
+  updates the shared `SupplierMemoryStore` via `update_from_outcome(...)`, and
+  writes a `SupplierPerformanceArtifact` (running-averages for delivery, quality,
+  price-competitiveness and carbon — no free parameters, no embeddings).
+- **History-weighted evaluation** — `EvaluationAgent` now accepts a `memory`
+  store; after the strategy-weighted composite, it applies
+  `history_adjustment(perf)` to the reliability term, clamped to `[0, 1]` and
+  rounded to 4dp. When no memory is supplied the adjustment is `0.0`, so the
+  Phase 4 balanced scores are reproduced exactly and existing assertions are
+  preserved.
+- **API + wiring** — `build_procurement_swarm(..., supplier_memory=...)` shares a
+  module-level `default_store` across requests; `POST /swarm/{request_id}/outcome`
+  and `GET /swarm/supplier/{supplier_id}/performance` expose the feedback loop,
+  and replay skips `RecordProcurementOutcome` so re-runs stay deterministic.
+
+Determinism caveat: the metrics are running means, so they are deterministic
+given the order of recorded outcomes; only `last_updated` timestamps vary with
+wall-clock time and tests avoid asserting timestamp equality.
+
 ## Outlook
 
-Phase 4 is complete: the six deterministic agents run the procurement flow end
-to end on the runtime spine with parallel, per-supplier steps gated by
-completion tracking, plus explicit strategy selection and auditable decision
-reasoning. What is deliberately left for later:
+Phase 5 is complete: an end-to-end deterministic procurement swarm with parallel,
+per-supplier steps, strategy-gated evaluation, auditable decision reasoning, and a
+supplier-intelligence feedback loop on the runtime spine. What is deliberately
+left for later:
 
 - **Live integration** — replace the seeded `MarketSimulator` reference with the
   live market feed and wire `DecisionMade` into the ledger / API, so the swarm
