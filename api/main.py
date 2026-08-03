@@ -21,13 +21,18 @@ from core.memory.semantic import PgVectorMemoryStore
 from core.protocol.auction_orchestrator import AuctionOrchestrator
 from core.protocol.policy_engine import PolicyContext, PolicyEngine
 from swarm import SwarmState
-from swarm.domain.agents import ApprovalAgent
+from swarm.domain.agents import ApprovalAgent, ExecutionTrackingAgent, PurchaseOrderAgent
 from swarm.domain.artifacts import (
     EXECUTION_AUTHORIZATION_ARTIFACT_NAME,
+    EXECUTION_STATUS_ARTIFACT_NAME,
     GOVERNANCE_DECISION_ARTIFACT_NAME,
+    PURCHASE_ORDER_ARTIFACT_NAME,
     RISK_ASSESSMENT_ARTIFACT_NAME,
 )
-from swarm.domain.events import CREATE_REQUIREMENT_INTENT, RECORD_OUTCOME_INTENT
+from swarm.domain.events import (
+    CREATE_REQUIREMENT_INTENT,
+    RECORD_OUTCOME_INTENT,
+)
 from swarm.domain.wiring import build_procurement_swarm
 from swarm.memory import default_store
 
@@ -558,6 +563,85 @@ async def get_swarm_authorization(request_id: str) -> dict[str, Any]:
             detail=f"No execution authorization for request_id {request_id}",
         )
     return {"request_id": request_id, "authorization": authorization.data}
+
+
+class ExecuteRequest(BaseModel):
+    """Optional overrides for resolving a pending authorization into an order."""
+
+    approver: str = "governance_sim"
+
+
+@app.post("/swarm/{request_id}/execute")
+async def execute_swarm_decision(
+    request_id: str, request: ExecuteRequest
+) -> dict[str, Any]:
+    """Create the purchase order (and track it) for an authorized swarm run.
+
+    Resolves the remembered swarm run: if the authorization is still pending it
+    is first granted deterministically (simulated approval), then a
+    :class:`PurchaseOrderAgent` creates the order and an
+    :class:`ExecutionTrackingAgent` records the realized execution status. The
+    step is idempotent — a present order status is returned as-is. A rejected or
+    absent authorization yields ``409 Conflict``.
+    """
+    state = _swarm_state(request_id)
+    authorization = state.get_artifact(EXECUTION_AUTHORIZATION_ARTIFACT_NAME)
+    if authorization is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No execution authorization for request_id {request_id}",
+        )
+    status = authorization.data.get("authorization_status")
+    if status == "pending":
+        ApprovalAgent().approve(state, approver=request.approver)
+        authorization = state.get_artifact(EXECUTION_AUTHORIZATION_ARTIFACT_NAME)
+        status = authorization.data.get("authorization_status")  # type: ignore[union-attr]
+    if status != "authorized":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Execution blocked: authorization is {status!r}",
+        )
+
+    order_agent = PurchaseOrderAgent()
+    order = order_agent.create_order(state)
+    if order is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No purchase order created for request_id {request_id}",
+        )
+    exec_agent = ExecutionTrackingAgent()
+    execution = exec_agent.track(state)
+    return {
+        "request_id": request_id,
+        "purchase_order": order.data,
+        "execution_status": execution.data if execution else None,
+    }
+
+
+@app.get("/swarm/order/{request_id}")
+async def get_swarm_order(request_id: str) -> dict[str, Any]:
+    """Read-only purchase order for a swarm run (after execution)."""
+    state = _swarm_state(request_id)
+    order = state.get_artifact(PURCHASE_ORDER_ARTIFACT_NAME)
+    if order is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No purchase order for request_id {request_id}",
+        )
+    return {"request_id": request_id, "purchase_order": order.data}
+
+
+@app.get("/swarm/execution/{request_id}")
+async def get_swarm_execution(request_id: str) -> dict[str, Any]:
+    """Read-only execution status (purchase order lifecycle) for a swarm run."""
+    state = _swarm_state(request_id)
+    status = state.get_artifact(EXECUTION_STATUS_ARTIFACT_NAME)
+    if status is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No execution status for request_id {request_id}",
+        )
+    return {"request_id": request_id, "execution_status": status.data}
 
 
 def _create_suppliers(material: str, spot_price: float, count: int = 5) -> list[SupplierAgent]:

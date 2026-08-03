@@ -155,16 +155,17 @@ deterministic and rule-based — no planning, no LLM, no autonomous learning. A
 (RFQ normalization, market simulation, multi-criteria scoring, the policy
 engine) into domain agents that cooperate over the event bus.
 
-The current flow is **parallel, per-supplier, and strategy-driven** (Phases 3–6):
+The current flow is **parallel, per-supplier, and strategy-driven** (Phases 3–7):
 discovery announces each supplier individually, evaluation and negotiation run
 one specialized step per supplier, a completion tracker gates the decision
 until every expected evaluation and quote artifact exists, the strategy agent
 picks a deterministic scoring strategy before any supplier is discovered, and the
 outcome + supplier-intelligence agents close a deterministic feedback loop that
-improves future evaluations. After the decision, a deterministic **governance
-tail** (risk → governance → approval) gates whether the award is safe and
-authorized to execute — all through artifacts and events on a single
-`correlation_id`.
+improves future evaluations. After the decision, two deterministic tails close the
+loop: a **governance tail** (risk → governance → approval) gates whether the award
+is safe and authorized to execute, and an **execution tail** (order → tracking
+→ delivery) records the authorized procurement through a connector — all through
+artifacts and events on a single `correlation_id`.
 
 ```mermaid
 flowchart LR
@@ -184,6 +185,9 @@ flowchart LR
     GA -->|GovernanceDecisionMade| APA[ApprovalAgent]
     APA -->|ApprovalGranted / ApprovalRequired / ApprovalRejected| AUTH[(ExecutionAuthorization)]
     USER -->|ApproveDecision (POST /approve)| APA
+    USER -->|Execute (POST /execute)| POA[PurchaseOrderAgent]
+    POA -->|PurchaseOrderCreated| ETA[ExecutionTrackingAgent]
+    ETA -->|ExecutionStatusUpdated| EXEC[(ExecutionStatus)]
     STATE-.->|OutcomeRecorded message| OA[OutcomeAgent]
     OA -->|OutcomeRecorded event| SIA[SupplierIntelligenceAgent]
     SIA -->|SupplierPerformanceUpdated| SM[(SupplierMemoryStore)]
@@ -196,6 +200,8 @@ flowchart LR
     RSA --> STATE
     GA --> STATE
     APA --> STATE
+    POA --> STATE
+    ETA --> STATE
     STATE[(Shared SwarmState)]
 ```
 
@@ -212,10 +218,12 @@ A more detailed walkthrough — including sequence diagrams and the hardening
 guarantees (`correlation_id`, event replay, capability schema, structured
 logging) — lives in [docs/swarm-architecture.md](docs/swarm-architecture.md).
 
-Phase 3–6 demo — one `CreateRequirement` message fans out through the deterministic
+Phase 3–7 demo — one `CreateRequirement` message fans out through the deterministic
 agents to a final supplier decision, then through the governance tail
-(risk → governance → approval) to an execution authorization; optionally followed
-by an outcome record that seeds the supplier performance memory:
+(risk → governance → approval) to an execution authorization, and through the
+execution tail (order → tracking → delivery) to a completed procurement;
+optionally followed by an outcome record that seeds the supplier performance
+memory:
 
 ```bash
 python -m examples.procurement_swarm_demo
@@ -249,10 +257,17 @@ python -m examples.procurement_swarm_demo
 8. The approval agent closes the gate into an `ExecutionAuthorizationArtifact`
    (`authorized` / `pending` / blocked). A pending authorization is resolved by
    `POST /swarm/{request_id}/approve` (deterministic simulated approval).
-9. A `RecordProcurementOutcome` message records what actually happened; the
-   outcome agent writes an `OutcomeArtifact` (lineaged to the `DecisionArtifact`)
-   and the supplier-intelligence agent folds it into a deterministic
-   `SupplierPerformanceArtifact` — visible to future evaluations.
+9. The purchase-order agent creates a `PurchaseOrderArtifact` (lineaged to the
+   authorization) only when the decision is `authorized` — pending/rejected
+   decisions produce no order — and submits it through a deterministic
+   `SupplierConnector`.
+10. The execution-tracking agent records an `ExecutionStatusArtifact` (the order's
+    realized lifecycle via the connector) and publishes `ExecutionStatusUpdated`;
+    a pending authorization is explicitly resolved by `POST /swarm/{request_id}/execute`.
+11. A `RecordProcurementOutcome` message records what actually happened; the
+    outcome agent writes an `OutcomeArtifact` (lineaged to the `DecisionArtifact`)
+    and the supplier-intelligence agent folds it into a deterministic
+    `SupplierPerformanceArtifact` — visible to future evaluations.
 
 The `Swarm` facade exposes the read-only execution trace:
 
@@ -684,6 +699,26 @@ parented through the full control-layer lineage:
 
 Each link is by `Artifact.id`; the outcome-feedback loop (`POST /swarm/{id}/outcome`)
 attaches alongside the decision for audit.
+
+### `POST /swarm/{request_id}/execute`
+
+Create the purchase order and track it for an authorized swarm run. Resolves a
+*pending* authorization via the deterministic simulated approval first, then
+creates the `PurchaseOrderArtifact` (only allowed when the decision is
+`authorized`; rejected/pending-without-approval or absent authorizations yield
+`409 Conflict`) and records the realized execution status. Idempotent — an
+already-executed run returns the existing order.
+
+### `GET /swarm/order/{request_id}`
+
+Read-only purchase order for a run: `order_id`, `supplier_id`, `total_amount`,
+`status` and line items (lineaged to the authorization).
+
+### `GET /swarm/execution/{request_id}`
+
+Read-only execution status (purchase-order lifecycle) for a run: terminal
+`status` and the deterministic `lifecycle` stage list
+(`SUBMITTED → CONFIRMED → SHIPPED → DELIVERED`).
 
 ### `GET /swarm/trace/{request_id}`
 

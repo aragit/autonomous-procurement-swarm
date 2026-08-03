@@ -20,6 +20,8 @@ SUPPLIER_PERFORMANCE_ARTIFACT_NAME = "supplier_performance"
 RISK_ASSESSMENT_ARTIFACT_NAME = "risk_assessment"
 GOVERNANCE_DECISION_ARTIFACT_NAME = "governance_decision"
 EXECUTION_AUTHORIZATION_ARTIFACT_NAME = "execution_authorization"
+PURCHASE_ORDER_ARTIFACT_NAME = "purchase_order"
+EXECUTION_STATUS_ARTIFACT_NAME = "execution_status"
 
 
 def evaluation_artifact_name(supplier_id: str) -> str:
@@ -353,3 +355,57 @@ class ExecutionAuthorizationArtifact(Artifact):
 
     kind: Literal["execution_authorization"] = "execution_authorization"
     name: str = EXECUTION_AUTHORIZATION_ARTIFACT_NAME
+
+
+class PurchaseOrderArtifact(Artifact):
+    """A purchase order created from an authorized decision (Phase 7).
+
+    Produced by :class:`PurchaseOrderAgent` from an
+    :class:`ExecutionAuthorizationArtifact` only when the decision is
+    ``authorized`` (governance has already excluded rejected decisions). Its
+    ``parent_ids`` reference the originating
+    :class:`ExecutionAuthorizationArtifact` (by id), continuing the control →
+    action lineage.
+
+    ``data`` contract::
+
+        {
+            "order_id": str,
+            "decision_id": str,
+            "authorization_id": str,
+            "supplier_id": str,
+            "currency": str,
+            "items": [{"material": str, "quantity": int, "unit_price": float}],
+            "total_amount": float,
+            "quantity": int,
+            "status": str,  # CREATED | SUBMITTED | CONFIRMED | SHIPPED | DELIVERED | CANCELLED
+            "created_at": str,
+            "submitted_at": str | None,
+        }
+    """
+
+    kind: Literal["purchase_order"] = "purchase_order"
+    name: str = PURCHASE_ORDER_ARTIFACT_NAME
+
+
+class ExecutionStatusArtifact(Artifact):
+    """The realized execution lifecycle of a purchase order (Phase 7).
+
+    Produced by :class:`ExecutionTrackingAgent` from a
+    :class:`PurchaseOrderArtifact` by asking the :class:`SupplierConnector` for
+    the order's status. Its ``parent_ids`` reference the originating
+    :class:`PurchaseOrderArtifact` (by id).
+
+    ``data`` contract::
+
+        {
+            "order_id": str,
+            "purchase_order_id": str,
+            "status": str,              # terminal/sampled status from the connector
+            "lifecycle": [str, ...],    # deterministic stages the order progressed through
+            "tracked_at": str,          # ISO-8601 UTC
+        }
+    """
+
+    kind: Literal["execution_status"] = "execution_status"
+    name: str = EXECUTION_STATUS_ARTIFACT_NAME

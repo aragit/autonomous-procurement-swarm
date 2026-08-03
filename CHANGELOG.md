@@ -4,6 +4,31 @@ Release history for the Autonomous Procurement Swarm. Tags follow a phase-driven
 `v0.x` scheme; `v0.2` was intentionally skipped — its concerns (Swarm Foundation)
 and (Procurement Agent Architecture) were delivered together in `v0.1`.
 
+## v0.7 — Execution & Procurement Operations (commit TBD)
+
+Added:
+- Deterministic purchase-order domain (`PurchaseOrder`, `PurchaseStatus`,
+  `OrderLine`) and a `SupplierConnector` protocol with a deterministic
+  `MockSupplierConnector` (submit → tracking lifecycle SUBMITTED →
+  CONFIRMED → SHIPPED → DELIVERED).
+- `PurchaseOrderAgent` (capability `procurement.order.create`): consumes
+  `ApprovalGranted`, writes a `PurchaseOrderArtifact` lineaged to the
+  `ExecutionAuthorizationArtifact` — only when the decision is `authorized`
+  (pending / rejected decisions produce no order).
+- `ExecutionTrackingAgent` (capability `procurement.execution.track`): consumes
+  `PurchaseOrderCreated`, records an `ExecutionStatusArtifact` (terminal status +
+  deterministic lifecycle) via the connector.
+- API: `POST /swarm/{request_id}/execute` (resolve a pending authorization into an
+  order + tracking status, idempotent), `GET /swarm/order/{request_id}`,
+  `GET /swarm/execution/{request_id}`.
+
+The swarm now runs the complete procurement lifecycle deterministically —
+requirement → strategy → discovery → evaluation → negotiation → decision →
+risk → governance → approval → authorization → **order → execution → completion** —
+with no LLM and no autonomous approval. The full artifact lineage is now:
+`Decision` → `RiskAssessment` → `GovernanceDecision` → `ExecutionAuthorization`
+→ `PurchaseOrder` → `ExecutionStatus` → `Outcome`.
+
 ## v0.6 — Governance + Risk-Aware Procurement (73ce35c)
 
 Added:

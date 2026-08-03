@@ -1,19 +1,20 @@
-"""End-to-end Phase 6 demo of the deterministic procurement swarm.
+"""End-to-end Phase 7 demo of the deterministic procurement swarm.
 
 Flow: one ``CreateRequirement`` message fans out through the parallel, wired
 swarm — requirement → strategy selection → per-supplier discovery →
 per-supplier evaluation (weighted by the strategy) → per-supplier quoting →
 completion-tracked decision → decision explanation. The decision then flows
-through the deterministic governance tail — risk assessment → governance
-decision → approval → execution authorization — producing a final
-:class:`DecisionArtifact`, a human-readable :class:`DecisionExplanationArtifact`,
-:class:`RiskAssessmentArtifact`, :class:`GovernanceDecisionArtifact` and
-:class:`ExecutionAuthorizationArtifact` entirely through event-driven
-collaboration (``Message → Event → Artifact``).
+through the deterministic control and action tiers:
 
-The purchase amount is set high enough that the standard governance policy
-demands explicit approval (``ApprovalRequired``), so the demo also exercises
-the simulated approval step that resolves the authorization.
+- governance tail: risk assessment → governance decision → approval →
+  execution authorization
+- execution tier: purchase order → execution tracking → delivery status
+
+producing a final :class:`DecisionArtifact`, a human-readable
+:class:`DecisionExplanationArtifact`, :class:`RiskAssessmentArtifact`,
+:class:`GovernanceDecisionArtifact`, :class:`ExecutionAuthorizationArtifact`,
+:class:`PurchaseOrderArtifact` and :class:`ExecutionStatusArtifact` entirely
+through event-driven collaboration (``Message → Event → Artifact``).
 
 Run from the repository root with:
 
@@ -21,9 +22,10 @@ Run from the repository root with:
 
 The aluminum baseline (LOW blended risk, purchase amount below the 2M approval
 threshold) resolves through the standard policy straight to an authorized
-execution. To also exercise the approval-required branch, raise the quantity so
-the resulting purchase amount exceeds the policy's ``requires_approval_above_amount``
-and call ``POST /swarm/{request_id}/approve`` (see ``api/main.py``).
+execution and an auto-created purchase order tracked to delivery. To exercise
+the approval-required branch, raise the quantity so the resulting purchase
+amount exceeds the policy's ``requires_approval_above_amount`` and call
+``POST /swarm/{request_id}/approve`` then ``POST /swarm/{request_id}/execute``.
 """
 
 import asyncio
@@ -149,6 +151,20 @@ def main() -> None:
             f"authorization: status={data['authorization_status']} "
             f"approved_by={data.get('approved_by')} "
             f"risk_id={data.get('risk_assessment_id')}"
+        )
+
+    order = state.get_artifact("purchase_order")
+    execution = state.get_artifact("execution_status")
+    if order is not None:
+        data = order.data
+        print(
+            f"purchase_order: id={data['order_id']} supplier={data['supplier_id']} "
+            f"amount={data['total_amount']} status={data['status']}"
+        )
+    if execution is not None:
+        data = execution.data
+        print(
+            f"execution: status={data['status']} lifecycle={data.get('lifecycle')}"
         )
 
     print(f"completions: {state.completions}")
