@@ -17,6 +17,7 @@ from enum import StrEnum
 
 CREATE_REQUIREMENT_INTENT = "CreateRequirement"
 RECORD_OUTCOME_INTENT = "RecordProcurementOutcome"
+APPROVE_INTENT = "ApproveDecision"
 
 
 class ProcurementEventType(StrEnum):
@@ -32,3 +33,8 @@ class ProcurementEventType(StrEnum):
     DECISION_MADE = "DecisionMade"
     OUTCOME_RECORDED = "OutcomeRecorded"
     SUPPLIER_PERFORMANCE_UPDATED = "SupplierPerformanceUpdated"
+    RISK_ASSESSMENT_COMPLETED = "RiskAssessmentCompleted"
+    GOVERNANCE_DECISION_MADE = "GovernanceDecisionMade"
+    APPROVAL_GRANTED = "ApprovalGranted"
+    APPROVAL_REQUIRED = "ApprovalRequired"
+    APPROVAL_REJECTED = "ApprovalRejected"

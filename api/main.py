@@ -21,6 +21,12 @@ from core.memory.semantic import PgVectorMemoryStore
 from core.protocol.auction_orchestrator import AuctionOrchestrator
 from core.protocol.policy_engine import PolicyContext, PolicyEngine
 from swarm import SwarmState
+from swarm.domain.agents import ApprovalAgent
+from swarm.domain.artifacts import (
+    EXECUTION_AUTHORIZATION_ARTIFACT_NAME,
+    GOVERNANCE_DECISION_ARTIFACT_NAME,
+    RISK_ASSESSMENT_ARTIFACT_NAME,
+)
 from swarm.domain.events import CREATE_REQUIREMENT_INTENT, RECORD_OUTCOME_INTENT
 from swarm.domain.wiring import build_procurement_swarm
 from swarm.memory import default_store
@@ -482,6 +488,76 @@ async def get_swarm_explanation(request_id: str) -> dict[str, Any]:
             detail=f"No decision explanation for request_id {request_id}",
         )
     return {"request_id": request_id, "explanation": explanation.data}
+
+
+@app.get("/swarm/risk/{request_id}")
+async def get_swarm_risk(request_id: str) -> dict[str, Any]:
+    """Deterministic risk assessment for the selected decision of a swarm run."""
+    state = _swarm_state(request_id)
+    risk = state.get_artifact(RISK_ASSESSMENT_ARTIFACT_NAME)
+    if risk is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No risk assessment for request_id {request_id}",
+        )
+    return {"request_id": request_id, "risk": risk.data}
+
+
+@app.get("/swarm/governance/{request_id}")
+async def get_swarm_governance(request_id: str) -> dict[str, Any]:
+    """Governance decision (approve / approval-required / reject) for a swarm run."""
+    state = _swarm_state(request_id)
+    governance = state.get_artifact(GOVERNANCE_DECISION_ARTIFACT_NAME)
+    if governance is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No governance decision for request_id {request_id}",
+        )
+    return {"request_id": request_id, "governance": governance.data}
+
+
+class ApproveRequest(BaseModel):
+    """A simulated human approval resolution for a pending authorization."""
+
+    approver: str = "governance_sim"
+
+
+@app.post("/swarm/{request_id}/approve")
+async def approve_swarm_decision(
+    request_id: str, request: ApproveRequest
+) -> dict[str, Any]:
+    """Resolve a pending authorization (deterministic simulated human approval).
+
+    Looks up the remembered swarm run, applies the :class:`ApprovalAgent` simulated
+    approval to the pending ``ExecutionAuthorizationArtifact``, and returns the
+    resulting authorization. Governance has already excluded rejected decisions,
+    so a pending authorization is granted deterministically.
+    """
+    state = _swarm_state(request_id)
+    agent = ApprovalAgent()
+    authorization = agent.approve(state, approver=request.approver)
+    if authorization is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No pending authorization to approve for request_id {request_id}",
+        )
+    return {
+        "request_id": request_id,
+        "authorization": authorization.data,
+    }
+
+
+@app.get("/swarm/authorization/{request_id}")
+async def get_swarm_authorization(request_id: str) -> dict[str, Any]:
+    """Execution authorization status for a swarm run (after governance+approval)."""
+    state = _swarm_state(request_id)
+    authorization = state.get_artifact(EXECUTION_AUTHORIZATION_ARTIFACT_NAME)
+    if authorization is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No execution authorization for request_id {request_id}",
+        )
+    return {"request_id": request_id, "authorization": authorization.data}
 
 
 def _create_suppliers(material: str, spot_price: float, count: int = 5) -> list[SupplierAgent]:

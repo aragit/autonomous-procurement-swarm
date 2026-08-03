@@ -155,13 +155,15 @@ deterministic and rule-based — no planning, no LLM, no autonomous learning. A
 (RFQ normalization, market simulation, multi-criteria scoring, the policy
 engine) into domain agents that cooperate over the event bus.
 
-The current flow is **parallel, per-supplier, and strategy-driven** (Phases 3–5):
+The current flow is **parallel, per-supplier, and strategy-driven** (Phases 3–6):
 discovery announces each supplier individually, evaluation and negotiation run
 one specialized step per supplier, a completion tracker gates the decision
 until every expected evaluation and quote artifact exists, the strategy agent
 picks a deterministic scoring strategy before any supplier is discovered, and the
 outcome + supplier-intelligence agents close a deterministic feedback loop that
-improves future evaluations — all through artifacts and events on a single
+improves future evaluations. After the decision, a deterministic **governance
+tail** (risk → governance → approval) gates whether the award is safe and
+authorized to execute — all through artifacts and events on a single
 `correlation_id`.
 
 ```mermaid
@@ -177,8 +179,12 @@ flowchart LR
     EAV --> CT[CompletionTracker]
     NA --> CT
     CT -->|QuotesCompleted| DA[DecisionAgent]
-    DA -->|DecisionMade| STATE[(Shared SwarmState)]
-    STATE -.->|OutcomeRecorded message| OA[OutcomeAgent]
+    DA -->|DecisionMade| RSA[RiskAssessmentAgent]
+    RSA -->|RiskAssessmentCompleted| GA[GovernanceAgent]
+    GA -->|GovernanceDecisionMade| APA[ApprovalAgent]
+    APA -->|ApprovalGranted / ApprovalRequired / ApprovalRejected| AUTH[(ExecutionAuthorization)]
+    USER -->|ApproveDecision (POST /approve)| APA
+    STATE-.->|OutcomeRecorded message| OA[OutcomeAgent]
     OA -->|OutcomeRecorded event| SIA[SupplierIntelligenceAgent]
     SIA -->|SupplierPerformanceUpdated| SM[(SupplierMemoryStore)]
     SM -.->|history| EAV
@@ -187,6 +193,10 @@ flowchart LR
     EAV --> STATE
     NA --> STATE
     DA --> STATE
+    RSA --> STATE
+    GA --> STATE
+    APA --> STATE
+    STATE[(Shared SwarmState)]
 ```
 
 The four pillars:
@@ -202,9 +212,10 @@ A more detailed walkthrough — including sequence diagrams and the hardening
 guarantees (`correlation_id`, event replay, capability schema, structured
 logging) — lives in [docs/swarm-architecture.md](docs/swarm-architecture.md).
 
-Phase 3–5 demo — one `CreateRequirement` message fans out through the six
-deterministic agents to a final supplier decision, optionally followed by an
-outcome record that seeds the supplier performance memory:
+Phase 3–6 demo — one `CreateRequirement` message fans out through the deterministic
+agents to a final supplier decision, then through the governance tail
+(risk → governance → approval) to an execution authorization; optionally followed
+by an outcome record that seeds the supplier performance memory:
 
 ```bash
 python -m examples.procurement_swarm_demo
@@ -231,7 +242,14 @@ python -m examples.procurement_swarm_demo
    through the policy engine and picks the winner, then emits a
    `DecisionExplanationArtifact` explaining *why*. All within one
    `correlation_id`.
-6. A `RecordProcurementOutcome` message records what actually happened; the
+6. The risk agent assesses the decision against supplier history, the purchase
+   amount and carbon footprint → `RiskAssessmentCompleted`.
+7. The governance agent applies the active `GovernancePolicy` →
+   `GovernanceDecisionMade` (`APPROVED` / `APPROVAL_REQUIRED` / `REJECTED`).
+8. The approval agent closes the gate into an `ExecutionAuthorizationArtifact`
+   (`authorized` / `pending` / blocked). A pending authorization is resolved by
+   `POST /swarm/{request_id}/approve` (deterministic simulated approval).
+9. A `RecordProcurementOutcome` message records what actually happened; the
    outcome agent writes an `OutcomeArtifact` (lineaged to the `DecisionArtifact`)
    and the supplier-intelligence agent folds it into a deterministic
    `SupplierPerformanceArtifact` — visible to future evaluations.
@@ -616,8 +634,6 @@ why each other supplier was rejected).
 
 ### `GET /swarm/supplier/{supplier_id}/performance`
 
-### `GET /swarm/supplier/{supplier_id}/performance`
-
 Deterministic supplier performance summary (order count, delivery/quality/price
 competitiveness/carbon averages) from the in-memory `SupplierMemoryStore`.
 
@@ -635,6 +651,39 @@ competitiveness/carbon averages) from the in-memory `SupplierMemoryStore`.
   }
 }
 ```
+
+### `GET /swarm/risk/{request_id}`
+
+Deterministic risk assessment for the selected decision of a swarm run
+(`financial` / `delivery` / `quality` / `carbon` sub-scores, `overall_risk_score`,
+and `risk_level`: `LOW` / `MEDIUM` / `HIGH` / `CRITICAL`).
+
+### `GET /swarm/governance/{request_id}`
+
+Governance decision (`APPROVED` / `APPROVAL_REQUIRED` / `REJECTED`), the policy
+applied, and the `required_approver` (when approval is required).
+
+### `POST /swarm/{request_id}/approve`
+
+Resolve a pending (`APPROVAL_REQUIRED`) execution authorization via the
+deterministic simulated approval. Governance has already excluded rejected
+decisions, so a pending authorization is granted.
+
+**Request:**
+```json
+{ "approver": "governance_sim" }
+```
+
+### `GET /swarm/authorization/{request_id}`
+
+Final execution authorization status (`authorized` / `pending` / `rejected`),
+parented through the full control-layer lineage:
+
+    Requirement → Strategy → SupplierList → Evaluation → Quote → Decision
+      → RiskAssessment → GovernanceDecision → ExecutionAuthorization
+
+Each link is by `Artifact.id`; the outcome-feedback loop (`POST /swarm/{id}/outcome`)
+attaches alongside the decision for audit.
 
 ### `GET /swarm/trace/{request_id}`
 

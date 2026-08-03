@@ -4,6 +4,28 @@ Release history for the Autonomous Procurement Swarm. Tags follow a phase-driven
 `v0.x` scheme; `v0.2` was intentionally skipped — its concerns (Swarm Foundation)
 and (Procurement Agent Architecture) were delivered together in `v0.1`.
 
+## v0.6 — Governance + Risk-Aware Procurement (commit TBD)
+
+Added:
+- Deterministic risk assessment layer (`RiskAssessmentAgent`, `RiskAssessmentArtifact`):
+  financial / delivery / quality / carbon sub-scores blended into an
+  `overall_risk_score` and `RiskLevel` (LOW / MEDIUM / HIGH / CRITICAL).
+- Governance policy model (`GovernancePolicy`, `standard_policy`, `strict_policy`)
+  and `GovernanceAgent` producing `GovernanceDecisionArtifact`
+  (APPROVED / APPROVAL_REQUIRED / REJECTED).
+- Approval workflow (`ApprovalAgent`, `ExecutionAuthorizationArtifact`):
+  immediate authorization, pending approval, and explicit rejection;
+  deterministic simulated approval via `POST /swarm/{request_id}/approve`.
+- API: `GET /swarm/risk/{request_id}`, `GET /swarm/governance/{request_id}`,
+  `GET /swarm/authorization/{request_id}`, `POST /swarm/{request_id}/approve`.
+- Complete artifact lineage through the control layer:
+  `DecisionArtifact` → `RiskAssessmentArtifact` → `GovernanceDecisionArtifact`
+  → `ExecutionAuthorizationArtifact`.
+
+The swarm now answers "Who should we buy from?" **and** "Is this decision safe
+and authorized to execute?" — deterministically, with no LLM and no autonomous
+approval.
+
 ## v0.5 — Feedback Intelligence (e5e9ff4)
 
 Added:

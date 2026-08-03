@@ -4,26 +4,28 @@ The swarm runtime (`swarm/`) is the architectural spine for autonomous
 multi-agent procurement. This document describes its layers, the data flow of a
 single request, and where it is heading.
 
-> **Status:** Phase 5 — parallel, per-supplier procurement flow with deterministic
-> execution strategies and an auditable supplier-intelligence feedback loop on the
-> deterministic runtime spine. The runtime is intentionally deterministic — no
-> planning, no LLM integration, no autonomous learning — and the domain agents run
-> the procurement flow end to end with completion-tracked, parallel per-supplier
-> steps. Strategy selection, outcome feedback and supplier memory are explicit,
-> seed-based artifacts (no LLM, no embeddings, no vector DB). A planner (and any
-> LLM usage) remains explicitly out of scope.
+> **Status:** Phase 6 — an end-to-end deterministic Enterprise Procurement Swarm
+> with parallel, per-supplier execution, strategy-aware evaluation, an auditable
+> supplier-intelligence feedback loop, and a governance + risk layer that gates
+> whether a decision is safe and authorized to execute. The runtime is fully
+> deterministic — no planning, no LLM integration, no autonomous learning — and
+> a planner (and any LLM usage) remains explicitly out of scope. Governance,
+> risk and approval are static, policy-driven artifacts (no autonomous approval).
 
 ## Layer overview
 
 ```mermaid
 flowchart TB
-    subgraph Agents["Agents (Phase 5)"]
+    subgraph Agents["Agents (Phase 6)"]
         RA[RequirementAgent]
         SA[StrategyAgent]
         SDA[SupplierDiscoveryAgent]
         EA[EvaluationAgent]
         NA[NegotiationAgent]
         DA[DecisionAgent]
+        RSA[RiskAssessmentAgent]
+        GA[GovernanceAgent]
+        APA[ApprovalAgent]
         OA[OutcomeAgent]
         SIA[SupplierIntelligenceAgent]
     end
@@ -38,7 +40,7 @@ flowchart TB
 
     subgraph State["Shared State"]
         A[(SwarmState)]
-        AR[Artifacts: requirement / strategy / supplier_list / evaluation / quote / decision / decision_explanation / procurement_outcome / supplier_performance]
+        AR[Artifacts: requirement / strategy / supplier_list / evaluation / quote / decision / decision_explanation / risk_assessment / governance_decision / execution_authorization / procurement_outcome / supplier_performance]
         EV[Event history]
         RS[Results + completions]
     end
@@ -71,12 +73,13 @@ flowchart TB
 | **SwarmCoordinator** | `swarm/orchestration/coordinator.py` | Internal engine: registers agents, routes events, maintains state, seeds `correlation_id` |
 | **Swarm** | `swarm/core/__init__.py` | Public facade: start / stop / send / replay / `get_execution_trace` / `expect_artifact` / `complete_artifact`. No business logic |
 | **Logging** | `swarm/core/logging.py` | `SWARM_LOG_LEVEL` control (`DEBUG` full event detail, `INFO` lifecycle only) |
-| **Wiring** | `swarm/domain/wiring.py` | `build_procurement_swarm(...)` — registers all agents + tracker with the Phase 4 subscriptions and routing |
-| **Domain events** | `swarm/domain/events.py` | `ProcurementEventType` (`RequirementCreated`, `StrategySelected`, per-supplier `SupplierDiscovered` / `SupplierEvaluated` / `QuoteGenerated`, completion `EvaluationCompleted` / `QuotesCompleted`, `DecisionMade`) and the `CreateRequirement` intent |
-| **Domain artifacts** | `swarm/domain/artifacts.py` | Requirement / strategy / supplier list / evaluation / quote / decision / decision-explanation artifacts with documented data contracts and `parent_ids` lineage |
+| **Wiring** | `swarm/domain/wiring.py` | `build_procurement_swarm(..., supplier_memory=..., governance_policy=...)` — registers all agents + tracker with the Phase 6 subscriptions and strategy-weighted routing (Requirement→Strategy→Discovery→Evaluation→Negotiation→Decision→Risk→Governance→Approval) |
+| **Domain events** | `swarm/domain/events.py` | `ProcurementEventType` (`RequirementCreated`, `StrategySelected`, per-supplier `SupplierDiscovered` / `SupplierEvaluated` / `QuoteGenerated`, completion `EvaluationCompleted` / `QuotesCompleted`, `DecisionMade`, `RiskAssessmentCompleted`, `GovernanceDecisionMade`, `ApprovalGranted` / `ApprovalRequired` / `ApprovalRejected`) and the `CreateRequirement` intent |
+| **Domain artifacts** | `swarm/domain/artifacts.py` | Requirement / strategy / supplier list / evaluation / quote / decision / decision-explanation / `risk_assessment` / `governance_decision` / `execution_authorization` / procurement-outcome / supplier-performance artifacts with documented data contracts and `parent_ids` lineage |
 | **Pricing helpers** | `swarm/domain/pricing.py` | Deterministic floor price, lead time, carbon, bid bond (mirrors `core.agents.supplier` rules) |
-| **Domain agents** | `swarm/domain/agents/` | `RequirementAgent`, `StrategyAgent`, `SupplierDiscoveryAgent`, `EvaluationAgent`, `NegotiationAgent`, `DecisionAgent` — pure adapters over the existing `core/` logic |
-| **Wiring** | `swarm/domain/wiring.py` | `build_procurement_swarm(..., supplier_memory=...)` — registers all agents + tracker with the Phase 5 subscriptions and strategy-weighted routing; accepts a shared `SupplierMemoryStore` |
+| **Domain agents** | `swarm/domain/agents/` | `RequirementAgent`, `StrategyAgent`, `SupplierDiscoveryAgent`, `EvaluationAgent`, `NegotiationAgent`, `DecisionAgent`, `RiskAssessmentAgent`, `GovernanceAgent`, `ApprovalAgent`, `OutcomeAgent`, `SupplierIntelligenceAgent` — pure adapters over the existing `core/` logic |
+| **Risk model** | `swarm/domain/risk.py` | Deterministic `RiskAssessment` with financial / delivery / quality / carbon sub-scores, `RiskLevel`, and `compute_risk_scores` / `classify_risk` |
+| **Governance model** | `swarm/domain/governance.py` | `GovernancePolicy` (`standard_policy`, `strict_policy`) and deterministic `GovernanceDecision.from_risk` (`APPROVED` / `APPROVAL_REQUIRED` / `REJECTED`) |
 | **Supplier memory** | `swarm/memory/supplier.py` | Deterministic, in-memory `SupplierMemoryStore` + module-level `default_store`; `update_from_outcome` maintains running averages, `history_adjustment` maps reliability to a score delta |
 | **Strategies** | `swarm/domain/strategy.py` | `Strategy` (price / score / carbon weights summing to 1.0) with `DEFAULT_STRATEGIES` (`cost_optimized`, `balanced`, `low_carbon`) and deterministic `select_strategy(constraints)` |
 
@@ -207,12 +210,21 @@ replaced, reordered, or replayed without coupling.
   routing / `drive_on_event` / `route_on_event`, and `step` raises
   `RuntimeError` if it was never set. Routing uses `route_on_event(route, state)`
   so a route-selected agent also sees the shared state.
- - **Deterministic domain layer** — the Phase 4 agents are pure, seed-based
-   adapters: the market, the supplier pool, the evaluation scores, the quotes and
-   strategy selection are all deterministic, so the same `CreateRequirement`
-   message always yields the same strategy and the same decision. Domain agents
-   skip *replayed* events in `perceive`, so audit-log replay never re-runs the
-   flow.
+ - **Deterministic domain layer** — the Phase 6 agents are pure, seed-based
+   adapters: the market, the supplier pool, the evaluation scores, the quotes,
+   strategy selection, risk assessment, governance and approval are all
+   deterministic, so the same `CreateRequirement` message always yields the same
+   strategy, decision, risk and authorization. Domain agents skip *replayed*
+   events in `perceive`, so audit-log replay never re-runs the flow.
+ - **Completion tracking** — `SwarmState.expect_artifact(kind, count=..., correlation_id=...)`
+   declares group sizes; `CompletionTracker` (subscribed to every event, ignoring
+   replayed ones) closes a group once the expected artifact count exists and
+   publishes the completion event exactly once. `complete_artifact` /
+   `is_group_completed` are idempotent and per-`correlation_id`.
+ - **Execution trace** — `Swarm.get_execution_trace(correlation_id)` is read-only:
+   it derives `events`, `artifacts` and a chronological `agent_actions` audit
+   trail (artifact creation + event publication per agent, runtime-sourced events
+   filtered) from canonical state and never mutates it.
 
 ## Phase 4: strategy-based evaluation and auditable decisions
 
@@ -247,20 +259,43 @@ This keeps the runtime deterministic and LLM-free while making *what* is
 optimized and *why* it was chosen explicit and traceable through the same
 artifact/event lineage.
 
-- **Completion tracking** — `SwarmState.expect_artifact(kind, count=..., correlation_id=...)`
-  declares group sizes; `CompletionTracker` (subscribed to every event, ignoring
-  replayed ones) closes a group once the expected artifact count exists and
-  publishes the completion event exactly once. `complete_artifact` / 
-  `is_group_completed` are idempotent and per-`correlation_id`.
-- **Execution trace** — `Swarm.get_execution_trace(correlation_id)` is read-only:
-  it derives `events`, `artifacts` and a chronological `agent_actions` audit
-  trail (artifact creation + event publication per agent, runtime-sourced events
-  filtered) from canonical state and never mutates it.
+## Phase 6: deterministic governance, risk and approval
+
+Phase 5 answered *"who should we buy from?"* and fed the result back into
+supplier memory. Phase 6 adds the control layer that answers *"is this decision
+safe and authorized to execute?"* — a deterministic governance tail that runs
+after the decision and never blocks the existing Phase 1–5 flow:
+
+- **Risk assessment** — `RiskAssessmentAgent` reacts to `DecisionMade`, loads the
+  `DecisionArtifact`, the requirement, the selected supplier's `QuoteArtifact`,
+  its `SupplierPerformance` history and the active `GovernancePolicy`, and
+  computes four deterministic sub-scores (financial / delivery / quality /
+  carbon) blended into an `overall_risk_score` and an ordinal `risk_level`
+  (`LOW` / `MEDIUM` / `HIGH` / `CRITICAL`). It writes a `RiskAssessmentArtifact`
+  (parented to `DecisionArtifact.id`) and publishes `RiskAssessmentCompleted`.
+  No history yields neutral defaults, so a clean decision stays `LOW`.
+- **Governance** — `GovernanceAgent` applies the static `GovernancePolicy`
+  (`standard_policy` / `strict_policy`) to the risk assessment via the pure
+  `GovernanceDecision.from_risk`, producing `APPROVED` / `APPROVAL_REQUIRED` /
+  `REJECTED`. It writes a `GovernanceDecisionArtifact` (parented to
+  `RiskAssessmentArtifact.id`) and publishes `GovernanceDecisionMade`.
+- **Approval** — `ApprovalAgent` closes the gate: `APPROVED` grants an
+  `ExecutionAuthorizationArtifact` (`authorized`) immediately; `APPROVAL_REQUIRED`
+  records a `pending` authorization resolved by `POST /swarm/{request_id}/approve`
+  (deterministic simulated approval — no autonomous approval); `REJECTED` blocks
+  execution and publishes `ApprovalRejected`. The authorization is parented to
+  `GovernanceDecisionArtifact.id`.
+
+Full lineage: `RequirementArtifact → StrategyArtifact → SupplierListArtifact →
+EvaluationArtifact → QuoteArtifact → DecisionArtifact → RiskAssessmentArtifact →
+GovernanceDecisionArtifact → ExecutionAuthorizationArtifact`. Each link is by
+`Artifact.id`, and all three new agents skip *replayed* events so audit-log
+replay stays read-only and `test_full_procurement_flow_is_replay_safe` keeps
+passing.
 
 ## Phase 5: deterministic supplier intelligence and outcome feedback
 
-Phase 4 answered *what to optimize* and *why a supplier won*. Phase 5 makes the
-swarm learn from the outcome **deterministically** — closing the loop from
+Phase 5 makes the swarm learn from the outcome **deterministically** — closing the loop from
 `DecisionArtifact` → `ProcurementOutcome` → `SupplierPerformance`, without any
 LLM and without breaking Phase 4's scores.
 
@@ -290,16 +325,28 @@ wall-clock time and tests avoid asserting timestamp equality.
 
 ## Outlook
 
-Phase 5 is complete: an end-to-end deterministic procurement swarm with parallel,
-per-supplier steps, strategy-gated evaluation, auditable decision reasoning, and a
-supplier-intelligence feedback loop on the runtime spine. What is deliberately
-left for later:
+Phase 6 is complete: the runtime is now a deterministic **Enterprise Procurement
+Swarm** with parallel, per-supplier execution, strategy-aware evaluation, an
+auditable supplier-intelligence feedback loop, and a governance + risk layer that
+gates whether a decision is safe and authorized to execute. The maturity after
+Phase 6 is:
+
+```
+Intelligence:   Strategy  +  Feedback
+Decision:       Governance
+Risk:           Approval
+Authorization:  Execution
+```
+
+What is deliberately left for later:
 
 - **Live integration** — replace the seeded `MarketSimulator` reference with the
   live market feed and wire `DecisionMade` into the ledger / API, so the swarm
   becomes the auction engine's orchestration path. The read-only swarm trace
-  endpoints in `api/main.py` already expose dispatch (`POST /swarm/requirements`)
-  and trace reads (`GET /swarm/trace/{request_id}`, `/completions`,
+  endpoints in `api/main.py` already expose dispatch (`POST /swarm/requirements`),
+  the governance tail (`GET /swarm/risk/{request_id}`,
+  `GET /swarm/governance/{request_id}`, `POST /swarm/{request_id}/approve`), and
+  trace reads (`GET /swarm/trace/{request_id}`, `/completions`,
   `/swarm/state/{request_id}`).
 - **Planning** — an explicit planner (task decomposition, capability routing via
   `best_for_capability()`) that assembles the agent chain from intent rather than
@@ -307,6 +354,11 @@ left for later:
   material would then be selected by `route_on_event`.
 - **Robustness** — retries, sagas/compensation for failed stages, and durable
   event sourcing in place of the in-memory audit log.
-- **LLM integration** — remains explicitly out of scope by design; the runtime
-  is built so a single, guarded adapter could replace one deterministic stage
-  later without touching the bus or state model.
+- **LLM integration** — remains explicitly out of scope by design; the runtime is
+  built so a single, guarded adapter could replace one deterministic stage later
+  without touching the bus or state model.
+
+The next architectural phase is **v0.7 — External Execution & ERP Integration**
+(the procurement operating architecture reaching out to execute awarded decisions
+against an ERP/ledger), not LLMs.
+

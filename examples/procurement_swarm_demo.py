@@ -1,15 +1,29 @@
-"""End-to-end Phase 4 demo of the deterministic procurement swarm.
+"""End-to-end Phase 6 demo of the deterministic procurement swarm.
 
 Flow: one ``CreateRequirement`` message fans out through the parallel, wired
 swarm — requirement → strategy selection → per-supplier discovery →
 per-supplier evaluation (weighted by the strategy) → per-supplier quoting →
-completion-tracked decision → decision explanation — producing a final
-:class:`DecisionArtifact` and a human-readable :class:`DecisionExplanationArtifact`
-entirely through event-driven collaboration (``Message → Event → Artifact``).
+completion-tracked decision → decision explanation. The decision then flows
+through the deterministic governance tail — risk assessment → governance
+decision → approval → execution authorization — producing a final
+:class:`DecisionArtifact`, a human-readable :class:`DecisionExplanationArtifact`,
+:class:`RiskAssessmentArtifact`, :class:`GovernanceDecisionArtifact` and
+:class:`ExecutionAuthorizationArtifact` entirely through event-driven
+collaboration (``Message → Event → Artifact``).
+
+The purchase amount is set high enough that the standard governance policy
+demands explicit approval (``ApprovalRequired``), so the demo also exercises
+the simulated approval step that resolves the authorization.
 
 Run from the repository root with:
 
     python -m examples.procurement_swarm_demo
+
+The aluminum baseline (LOW blended risk, purchase amount below the 2M approval
+threshold) resolves through the standard policy straight to an authorized
+execution. To also exercise the approval-required branch, raise the quantity so
+the resulting purchase amount exceeds the policy's ``requires_approval_above_amount``
+and call ``POST /swarm/{request_id}/approve`` (see ``api/main.py``).
 """
 
 import asyncio
@@ -35,7 +49,7 @@ async def run() -> SwarmState:
             "text": "Source 1000 units of aluminum at market price",
             "material": "aluminum",
             "quantity": 1000,
-            "budget": 2_000_000.0,
+            "budget": 3_500_000.0,
             "target_lead_time_days": 30,
         },
         sender="user",
@@ -102,6 +116,41 @@ def main() -> None:
                 f"(score={entry['score']}, policy={entry['policy_passed']}, "
                 f"reason={entry['reason']})"
             )
+
+    risk = state.get_artifact("risk_assessment")
+    governance = state.get_artifact("governance_decision")
+    authorization = state.get_artifact("execution_authorization")
+    if risk is not None:
+        data = risk.data
+        scores = data.get("risk_scores", {})
+        components = {
+            k: round(float(scores[k]), 4)
+            for k in (
+                "financial_risk_score",
+                "delivery_risk_score",
+                "quality_risk_score",
+                "carbon_risk_score",
+            )
+            if k in scores
+        }
+        print(
+            f"risk: level={data['risk_level']} score={float(scores['overall_risk_score']):.4f} "
+            f"components={components}"
+        )
+    if governance is not None:
+        data = governance.data
+        print(
+            f"governance: status={data['status']} policy={data['policy_used']} "
+            f"reasons={data.get('reasons', [])}"
+        )
+    if authorization is not None:
+        data = authorization.data
+        print(
+            f"authorization: status={data['authorization_status']} "
+            f"approved_by={data.get('approved_by')} "
+            f"risk_id={data.get('risk_assessment_id')}"
+        )
+
     print(f"completions: {state.completions}")
     per_supplier = (
         ProcurementEventType.SUPPLIER_EVALUATED,

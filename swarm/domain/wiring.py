@@ -1,8 +1,8 @@
-"""Assembly of the full Phase 4 procurement swarm.
+"""Assembly of the full Phase 6 procurement swarm.
 
 ``build_procurement_swarm`` wires the deterministic agents together with a
 :class:`CompletionTracker` so the linear Phase 2 pipeline becomes a parallel,
-per-supplier multi-agent flow:
+per-supplier multi-agent flow with a governance tail:
 
 - ``RequirementAgent``  — listens for ``CreateRequirement`` messages
 - ``StrategyAgent``     — picks the execution strategy from the requirement and
@@ -13,12 +13,17 @@ per-supplier multi-agent flow:
   ``supplier.evaluate`` capability, so specialized evaluators can compete)
 - ``NegotiationAgent``  — quotes each evaluated supplier
 - ``DecisionAgent``     — decides only after ``QuotesCompleted`` fires
+- ``RiskAssessmentAgent`` — assesses the selected decision (subscribes to ``DecisionMade``)
+- ``GovernanceAgent``   — applies governance policy to the risk assessment
+- ``ApprovalAgent``     — closes the gate into an execution authorization
 - ``CompletionTracker`` — closes a phase once every expected artifact exists and
   publishes ``EvaluationCompleted`` / ``QuotesCompleted``
 
-The only public entry point is the returned :class:`Swarm` facade; callers
-drive it with ``send_message(CREATE_REQUIREMENT_INTENT, payload)`` and read the
-result through ``swarm.state``.
+The only public entry point is the returned :class:`Swarm` facade; callers drive
+it with ``send_message(CREATE_REQUIREMENT_INTENT, payload)`` and read the result
+through ``swarm.state``. ``build_procurement_swarm(..., supplier_memory=...)``
+shares deterministic supplier history across the evaluation and risk stages;
+``governance_policy`` selects the policy applied to each decision.
 """
 
 from collections.abc import Callable
@@ -28,16 +33,20 @@ from swarm.core.agent import BaseAgent
 from swarm.core.completion import CompletionTracker
 from swarm.core.event import ANY_EVENT, Event, SwarmEventType
 from swarm.domain.agents import (
+    ApprovalAgent,
     DecisionAgent,
     EvaluationAgent,
+    GovernanceAgent,
     NegotiationAgent,
     OutcomeAgent,
     RequirementAgent,
+    RiskAssessmentAgent,
     StrategyAgent,
     SupplierDiscoveryAgent,
     SupplierIntelligenceAgent,
 )
 from swarm.domain.events import ProcurementEventType
+from swarm.domain.governance import STANDARD_POLICY, GovernancePolicy
 from swarm.memory import SupplierMemoryStore
 
 COMPLETION_EVENTS = {
@@ -67,6 +76,7 @@ def build_procurement_swarm(
     request_id: str = "",
     goal: str = "",
     supplier_memory: SupplierMemoryStore | None = None,
+    governance_policy: GovernancePolicy | None = None,
 ) -> Swarm:
     """Create a wired procurement swarm with completion tracking enabled."""
     swarm = Swarm(request_id=request_id, goal=goal)
@@ -80,6 +90,8 @@ def build_procurement_swarm(
 
     memory = supplier_memory if supplier_memory is not None else SupplierMemoryStore()
     swarm.supplier_memory = memory  # type: ignore[attr-defined]
+    policy = governance_policy if governance_policy is not None else STANDARD_POLICY
+    swarm.governance_policy = policy  # type: ignore[attr-defined]
 
     swarm.register(RequirementAgent(), event_types=[SwarmEventType.MESSAGE])
     swarm.register(
@@ -104,6 +116,18 @@ def build_procurement_swarm(
     swarm.register(
         DecisionAgent(),
         event_types=[ProcurementEventType.QUOTES_COMPLETED],
+    )
+    swarm.register(
+        RiskAssessmentAgent(memory=memory, policy=policy),
+        event_types=[ProcurementEventType.DECISION_MADE],
+    )
+    swarm.register(
+        GovernanceAgent(policy=policy),
+        event_types=[ProcurementEventType.RISK_ASSESSMENT_COMPLETED],
+    )
+    swarm.register(
+        ApprovalAgent(),
+        event_types=[ProcurementEventType.GOVERNANCE_DECISION_MADE, SwarmEventType.MESSAGE],
     )
     swarm.register(
         OutcomeAgent(),

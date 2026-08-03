@@ -17,6 +17,9 @@ DECISION_ARTIFACT_NAME = "decision"
 DECISION_EXPLANATION_ARTIFACT_NAME = "decision_explanation"
 OUTCOME_ARTIFACT_NAME = "outcome"
 SUPPLIER_PERFORMANCE_ARTIFACT_NAME = "supplier_performance"
+RISK_ASSESSMENT_ARTIFACT_NAME = "risk_assessment"
+GOVERNANCE_DECISION_ARTIFACT_NAME = "governance_decision"
+EXECUTION_AUTHORIZATION_ARTIFACT_NAME = "execution_authorization"
 
 
 def evaluation_artifact_name(supplier_id: str) -> str:
@@ -267,3 +270,86 @@ class SupplierPerformanceArtifact(Artifact):
 
     kind: Literal["supplier_performance"] = "supplier_performance"
     name: str = SUPPLIER_PERFORMANCE_ARTIFACT_NAME
+
+
+class RiskAssessmentArtifact(Artifact):
+    """A deterministic risk assessment for a procurement decision.
+
+    Produced by :class:`RiskAssessmentAgent` and consumed by
+    :class:`GovernanceAgent`. Its ``parent_ids`` reference the originating
+    :class:`DecisionArtifact` (by id), continuing the governance lineage.
+
+    ``data`` contract::
+
+        {
+            "decision_id": str,            # DecisionArtifact.id (uuid)
+            "supplier_id": str,
+            "risk_id": str,
+            "purchase_amount": float,
+            "risk_scores": {
+                "financial_risk_score": float,
+                "delivery_risk_score": float,
+                "quality_risk_score": float,
+                "carbon_risk_score": float,
+                "overall_risk_score": float,
+            },
+            "risk_level": str,
+            "policy_name": str,
+            "created_at": str,
+        }
+    """
+
+    kind: Literal["risk_assessment"] = "risk_assessment"
+    name: str = RISK_ASSESSMENT_ARTIFACT_NAME
+
+
+class GovernanceDecisionArtifact(Artifact):
+    """The governance outcome of a risk assessment.
+
+    Produced by :class:`GovernanceAgent` from a
+    :class:`RiskAssessmentArtifact` and a :class:`GovernancePolicy`. Its
+    ``parent_ids`` reference the :class:`RiskAssessmentArtifact` (by id).
+
+    ``data`` contract::
+
+        {
+            "decision_id": str,
+            "supplier_id": str,
+            "risk_id": str,
+            "status": str,                # APPROVED | APPROVAL_REQUIRED | REJECTED
+            "policy_used": str,
+            "purchase_amount": float,
+            "overall_risk_score": float,
+            "risk_level": str,
+            "reasons": [str, ...],
+            "required_approver": str | None,
+        }
+    """
+
+    kind: Literal["governance_decision"] = "governance_decision"
+    name: str = GOVERNANCE_DECISION_ARTIFACT_NAME
+
+
+class ExecutionAuthorizationArtifact(Artifact):
+    """The final authorization gate before a decision may execute.
+
+    Produced by :class:`ApprovalAgent` from a
+    :class:`GovernanceDecisionArtifact`. ``authorization_status`` is
+    ``"authorized"`` (decision may execute), ``"pending"`` (human approval
+    required), or ``"rejected"`` (decision blocked). Its ``parent_ids``
+    reference the :class:`GovernanceDecisionArtifact` (by id).
+
+    ``data`` contract::
+
+        {
+            "decision_id": str,
+            "risk_assessment_id": str,
+            "governance_decision_id": str,
+            "authorization_status": str,
+            "approved_by": str | None,
+            "timestamp": str,             # ISO-8601 UTC
+        }
+    """
+
+    kind: Literal["execution_authorization"] = "execution_authorization"
+    name: str = EXECUTION_AUTHORIZATION_ARTIFACT_NAME
