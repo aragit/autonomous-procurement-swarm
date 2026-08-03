@@ -4,7 +4,7 @@ Release history for the Autonomous Procurement Swarm. Tags follow a phase-driven
 `v0.x` scheme; `v0.2` was intentionally skipped — its concerns (Swarm Foundation)
 and (Procurement Agent Architecture) were delivered together in `v0.1`.
 
-## v0.7 — Execution & Procurement Operations (commit TBD)
+## v0.7 — Execution & Procurement Operations (a7ea64f)
 
 Added:
 - Deterministic purchase-order domain (`PurchaseOrder`, `PurchaseStatus`,
