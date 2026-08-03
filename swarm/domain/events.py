@@ -22,6 +22,7 @@ class ProcurementEventType(StrEnum):
     """Domain events published by the procurement agents."""
 
     REQUIREMENT_CREATED = "RequirementCreated"
+    STRATEGY_SELECTED = "StrategySelected"
     SUPPLIER_DISCOVERED = "SupplierDiscovered"
     SUPPLIER_EVALUATED = "SupplierEvaluated"
     QUOTE_GENERATED = "QuoteGenerated"

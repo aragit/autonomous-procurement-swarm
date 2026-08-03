@@ -12,7 +12,9 @@ from swarm.core.artifact import Artifact
 
 REQUIREMENT_ARTIFACT_NAME = "requirement"
 SUPPLIER_LIST_ARTIFACT_NAME = "suppliers"
+STRATEGY_ARTIFACT_NAME = "strategy"
 DECISION_ARTIFACT_NAME = "decision"
+DECISION_EXPLANATION_ARTIFACT_NAME = "decision_explanation"
 
 
 def evaluation_artifact_name(supplier_id: str) -> str:
@@ -38,6 +40,7 @@ class RequirementArtifact(Artifact):
                 "max_unit_price": float | None,
                 "target_lead_time_days": int,
                 "budget": float,
+                "max_carbon_per_unit": float | None,  # strict carbon constraint
             },
             "metadata": {                      # raw input + RFQ normalization
                 "raw": dict,
@@ -48,6 +51,26 @@ class RequirementArtifact(Artifact):
 
     kind: Literal["requirement"] = "requirement"
     name: str = REQUIREMENT_ARTIFACT_NAME
+
+
+class StrategyArtifact(Artifact):
+    """The execution strategy selected for a requirement.
+
+    ``data`` contract::
+
+        {
+            "strategy_name": str,              # one of the DEFAULT_STRATEGIES
+            "description": str,
+            "weights": {                       # sums to 1.0
+                "price_weight": float,
+                "score_weight": float,
+                "carbon_weight": float,
+            },
+        }
+    """
+
+    kind: Literal["strategy"] = "strategy"
+    name: str = STRATEGY_ARTIFACT_NAME
 
 
 class SupplierListArtifact(Artifact):
@@ -148,3 +171,34 @@ class DecisionArtifact(Artifact):
 
     kind: Literal["decision"] = "decision"
     name: str = DECISION_ARTIFACT_NAME
+
+
+class DecisionExplanationArtifact(Artifact):
+    """A human-readable explanation of the final supplier selection.
+
+    Produced by the decision agent immediately after the decision so the "why"
+    of a selection is auditable. ``data`` contract::
+
+        {
+            "selected_supplier": str | None,
+            "strategy_used": str,              # name of the execution strategy
+            "top_factors": [                   # why the winner was chosen
+                "Highest composite score ...",
+                ...
+            ],
+            "rejected_suppliers": [            # every non-selected supplier
+                {
+                    "supplier_id": str,
+                    "score": float,
+                    "price": float,
+                    "policy_passed": bool,
+                    "policy_reason": str,
+                    "reason": str,             # why it lost / was rejected
+                },
+                ...
+            ],
+        }
+    """
+
+    kind: Literal["decision_explanation"] = "decision_explanation"
+    name: str = DECISION_EXPLANATION_ARTIFACT_NAME

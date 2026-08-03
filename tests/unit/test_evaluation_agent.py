@@ -100,7 +100,13 @@ async def test_evaluation_agent_artifacts_are_taggable_named_and_linaged():
     assert miner.tags == {"supplier": "MinerCorp_A"}
     assert miner.parent_ids == ["suppliers"]
     assert miner.correlation_id == "REQ-CONV"
-    assert set(miner.data["breakdown"]) == {"price", "lead_time", "esg", "reliability"}
+    assert set(miner.data["breakdown"]) == {
+        "price",
+        "lead_time",
+        "esg",
+        "reliability",
+        "quality",
+    }
     assert miner.data["bid"]["unit_price"] == 984.0
 
 

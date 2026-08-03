@@ -1,10 +1,12 @@
-"""Assembly of the full Phase 3 procurement swarm.
+"""Assembly of the full Phase 4 procurement swarm.
 
-``build_procurement_swarm`` wires the five deterministic agents together with a
+``build_procurement_swarm`` wires the deterministic agents together with a
 :class:`CompletionTracker` so the linear Phase 2 pipeline becomes a parallel,
 per-supplier multi-agent flow:
 
 - ``RequirementAgent``  — listens for ``CreateRequirement`` messages
+- ``StrategyAgent``     — picks the execution strategy from the requirement and
+  publishes ``StrategySelected`` before any supplier is discovered
 - ``SupplierDiscoveryAgent`` — publishes one ``SupplierDiscovered`` per supplier
   and declares the evaluation/quote completion expectations
 - ``EvaluationAgent``   — evaluates each discovered supplier (routed by the
@@ -30,6 +32,7 @@ from swarm.domain.agents import (
     EvaluationAgent,
     NegotiationAgent,
     RequirementAgent,
+    StrategyAgent,
     SupplierDiscoveryAgent,
 )
 from swarm.domain.events import ProcurementEventType
@@ -69,8 +72,12 @@ def build_procurement_swarm(*, request_id: str = "", goal: str = "") -> Swarm:
 
     swarm.register(RequirementAgent(), event_types=[SwarmEventType.MESSAGE])
     swarm.register(
-        SupplierDiscoveryAgent(),
+        StrategyAgent(),
         event_types=[ProcurementEventType.REQUIREMENT_CREATED],
+    )
+    swarm.register(
+        SupplierDiscoveryAgent(),
+        event_types=[ProcurementEventType.STRATEGY_SELECTED],
     )
     swarm.register(
         EvaluationAgent(),

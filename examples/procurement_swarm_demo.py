@@ -1,10 +1,11 @@
-"""End-to-end Phase 3 demo of the deterministic procurement swarm.
+"""End-to-end Phase 4 demo of the deterministic procurement swarm.
 
 Flow: one ``CreateRequirement`` message fans out through the parallel, wired
-swarm — requirement → per-supplier discovery → per-supplier evaluation →
-per-supplier quoting → completion-tracked decision — producing a final
-:class:`DecisionArtifact` entirely through event-driven collaboration
-(``Message → Event → Artifact``).
+swarm — requirement → strategy selection → per-supplier discovery →
+per-supplier evaluation (weighted by the strategy) → per-supplier quoting →
+completion-tracked decision → decision explanation — producing a final
+:class:`DecisionArtifact` and a human-readable :class:`DecisionExplanationArtifact`
+entirely through event-driven collaboration (``Message → Event → Artifact``).
 
 Run from the repository root with:
 
@@ -50,14 +51,20 @@ def main() -> None:
     state = asyncio.run(run())
 
     requirement = state.get_artifact("requirement")
+    strategy = state.get_artifact("strategy")
     pool = state.get_artifact("suppliers")
     evaluations = state.find_artifacts(kind="evaluation")
     quotes = state.find_artifacts(kind="quote")
     decision = state.get_artifact("decision")
+    explanation = state.get_artifact("decision_explanation")
 
     print(f"request_id: {state.request_id}")
     print(f"goal: {state.goal}")
     print(f"requirement: {requirement.data['constraints'] if requirement else None}")
+    print(
+        f"strategy: {strategy.data['strategy_name'] if strategy else None} "
+        f"weights={strategy.data.get('weights') if strategy else None}"
+    )
     print(f"suppliers discovered: {len(pool.data['suppliers']) if pool else 0}")
     print(
         "evaluations: "
@@ -83,6 +90,18 @@ def main() -> None:
         )
     )
     print(f"decision: {decision.data if decision else None}")
+    if explanation is not None:
+        data = explanation.data
+        print(f"explanation.strategy_used: {data['strategy_used']}")
+        print(f"explanation.selected_supplier: {data['selected_supplier']}")
+        for factor in data.get("top_factors", []):
+            print(f"  factor: {factor}")
+        for entry in data.get("rejected_suppliers", []):
+            print(
+                f"  rejected: {entry['supplier_id']} "
+                f"(score={entry['score']}, policy={entry['policy_passed']}, "
+                f"reason={entry['reason']})"
+            )
     print(f"completions: {state.completions}")
     per_supplier = (
         ProcurementEventType.SUPPLIER_EVALUATED,

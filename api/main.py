@@ -103,6 +103,7 @@ class SwarmRequirementRequest(BaseModel):
     quantity: int = Field(default=1000, gt=0)
     budget: float = Field(default=2_000_000.0, gt=0)
     target_lead_time_days: int = 30
+    max_carbon_per_unit: float | None = Field(default=None, gt=0)
     goal: str | None = None
 
     @field_validator("material")
@@ -309,11 +310,14 @@ def _remember(state: SwarmState) -> None:
 async def dispatch_swarm_requirement(
     request: SwarmRequirementRequest,
 ) -> SwarmDispatchResponse:
-    """Dispatch a requirement into the deterministic Phase 3 swarm.
+    """Dispatch a requirement into the deterministic Phase 4 swarm.
 
-    Runs the full parallel flow (requirement → per-supplier discovery →
-    evaluation → quoting → completion-tracked decision) without any LLM, then
-    stores the resulting state so the trace endpoints below can serve it.
+    Runs the full parallel flow (requirement → strategy → per-supplier
+    discovery → evaluation → quoting → completion-tracked decision) without any
+    LLM, then stores the resulting state so the trace endpoints below can serve
+    it. An optional ``max_carbon_per_unit`` constraint selects the low-carbon
+    strategy; a tight budget selects the cost-optimized strategy; otherwise the
+    balanced strategy is used.
     """
     request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
     swarm = build_procurement_swarm(
@@ -330,6 +334,7 @@ async def dispatch_swarm_requirement(
             "quantity": request.quantity,
             "budget": request.budget,
             "target_lead_time_days": request.target_lead_time_days,
+            "max_carbon_per_unit": request.max_carbon_per_unit,
         },
         sender="user",
         correlation_id=correlation_id,
@@ -378,6 +383,24 @@ async def get_swarm_state(request_id: str) -> dict[str, Any]:
     """Full serialized read-only snapshot of a swarm run's state."""
     state = _swarm_state(request_id)
     return state.to_dict()
+
+
+@app.get("/swarm/explanation/{request_id}")
+async def get_swarm_explanation(request_id: str) -> dict[str, Any]:
+    """Human-readable explanation of the swarm's supplier selection.
+
+    Serves the ``DecisionExplanationArtifact`` (deterministic, no LLM): the
+    selected supplier, the strategy used, the deciding factors, and why every
+    other supplier was rejected.
+    """
+    state = _swarm_state(request_id)
+    explanation = state.get_artifact("decision_explanation")
+    if explanation is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No decision explanation for request_id {request_id}",
+        )
+    return {"request_id": request_id, "explanation": explanation.data}
 
 
 def _create_suppliers(material: str, spot_price: float, count: int = 5) -> list[SupplierAgent]:

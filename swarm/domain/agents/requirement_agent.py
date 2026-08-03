@@ -25,6 +25,17 @@ logger = structlog.get_logger(__name__)
 VALID_MATERIALS = ("steel", "aluminum", "copper", "plastic", "lumber", "rubber")
 
 
+def _parse_carbon_constraint(value: Any) -> float | None:
+    """Parse a strict per-unit carbon constraint, or None when absent/invalid."""
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 class RequirementAgent(BaseAgent):
     """Creates a :class:`RequirementArtifact` from a ``CreateRequirement`` message."""
 
@@ -111,6 +122,7 @@ class RequirementAgent(BaseAgent):
             max_unit_price = round(spot_price * 1.2, 2)
         max_unit_price = max(float(max_unit_price or 1.0), 1.0)
         target_lead_time_days = int(payload.get("target_lead_time_days") or 30)
+        max_carbon_per_unit = _parse_carbon_constraint(payload.get("max_carbon_per_unit"))
 
         constraints: dict[str, Any] = {
             "material": material,
@@ -118,6 +130,7 @@ class RequirementAgent(BaseAgent):
             "max_unit_price": max_unit_price,
             "target_lead_time_days": target_lead_time_days,
             "budget": budget,
+            "max_carbon_per_unit": max_carbon_per_unit,
         }
         metadata: dict[str, Any] = {"raw": payload}
         if max_unit_price > 0:

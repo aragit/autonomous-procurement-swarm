@@ -4,19 +4,22 @@ The swarm runtime (`swarm/`) is the architectural spine for autonomous
 multi-agent procurement. This document describes its layers, the data flow of a
 single request, and where it is heading.
 
-> **Status:** Phase 3 — parallel, per-supplier procurement flow on the
-> deterministic runtime spine. The runtime is intentionally deterministic — no
-> planning, no LLM integration — and the domain agents run the procurement flow
-> end to end with completion-tracked, parallel per-supplier steps. A planner
-> (and any LLM usage) remains explicitly out of scope.
+> **Status:** Phase 4 — deterministic execution strategies + auditable decision
+> explanations on the parallel procurement flow. The runtime is intentionally
+> deterministic — no planning, no LLM integration — and the domain agents run the
+> procurement flow end to end with completion-tracked, parallel per-supplier
+> steps. Strategy selection and decision rationale are explicit, seed-based
+> artifacts (no LLM). A planner (and any LLM usage) remains explicitly out of
+> scope.
 
 ## Layer overview
 
 ```mermaid
 flowchart TB
-    subgraph Agents["Agents (Phase 3)"]
+    subgraph Agents["Agents (Phase 4)"]
         RA[RequirementAgent]
-        SA[SupplierDiscoveryAgent]
+        SA[StrategyAgent]
+        SDA[SupplierDiscoveryAgent]
         EA[EvaluationAgent]
         NA[NegotiationAgent]
         DA[DecisionAgent]
@@ -32,7 +35,7 @@ flowchart TB
 
     subgraph State["Shared State"]
         A[(SwarmState)]
-        AR[Artifacts: requirement / supplier_list / evaluation / quote / decision]
+        AR[Artifacts: requirement / strategy / supplier_list / evaluation / quote / decision / decision_explanation]
         EV[Event history]
         RS[Results + completions]
     end
@@ -65,11 +68,12 @@ flowchart TB
 | **SwarmCoordinator** | `swarm/orchestration/coordinator.py` | Internal engine: registers agents, routes events, maintains state, seeds `correlation_id` |
 | **Swarm** | `swarm/core/__init__.py` | Public facade: start / stop / send / replay / `get_execution_trace` / `expect_artifact` / `complete_artifact`. No business logic |
 | **Logging** | `swarm/core/logging.py` | `SWARM_LOG_LEVEL` control (`DEBUG` full event detail, `INFO` lifecycle only) |
-| **Wiring** | `swarm/domain/wiring.py` | `build_procurement_swarm(...)` — registers all agents + tracker with the Phase 3 subscriptions and routing |
-| **Domain events** | `swarm/domain/events.py` | `ProcurementEventType` (`RequirementCreated`, per-supplier `SupplierDiscovered` / `SupplierEvaluated` / `QuoteGenerated`, completion `EvaluationCompleted` / `QuotesCompleted`, `DecisionMade`) and the `CreateRequirement` intent |
-| **Domain artifacts** | `swarm/domain/artifacts.py` | Requirement / supplier list / evaluation / quote / decision artifacts with documented data contracts and `parent_ids` lineage |
+| **Wiring** | `swarm/domain/wiring.py` | `build_procurement_swarm(...)` — registers all agents + tracker with the Phase 4 subscriptions and routing |
+| **Domain events** | `swarm/domain/events.py` | `ProcurementEventType` (`RequirementCreated`, `StrategySelected`, per-supplier `SupplierDiscovered` / `SupplierEvaluated` / `QuoteGenerated`, completion `EvaluationCompleted` / `QuotesCompleted`, `DecisionMade`) and the `CreateRequirement` intent |
+| **Domain artifacts** | `swarm/domain/artifacts.py` | Requirement / strategy / supplier list / evaluation / quote / decision / decision-explanation artifacts with documented data contracts and `parent_ids` lineage |
 | **Pricing helpers** | `swarm/domain/pricing.py` | Deterministic floor price, lead time, carbon, bid bond (mirrors `core.agents.supplier` rules) |
-| **Domain agents** | `swarm/domain/agents/` | `RequirementAgent`, `SupplierDiscoveryAgent`, `EvaluationAgent`, `NegotiationAgent`, `DecisionAgent` — pure adapters over the existing `core/` logic |
+| **Domain agents** | `swarm/domain/agents/` | `RequirementAgent`, `StrategyAgent`, `SupplierDiscoveryAgent`, `EvaluationAgent`, `NegotiationAgent`, `DecisionAgent` — pure adapters over the existing `core/` logic |
+| **Strategies** | `swarm/domain/strategy.py` | `Strategy` (price / score / carbon weights summing to 1.0) with `DEFAULT_STRATEGIES` (`cost_optimized`, `balanced`, `low_carbon`) and deterministic `select_strategy(constraints)` |
 
 ## Request flow
 
@@ -79,20 +83,23 @@ sequenceDiagram
     participant S as Swarm (facade)
     participant B as EventBus
     participant RA as RequirementAgent
+    participant ST as StrategyAgent
     participant SDA as SupplierDiscoveryAgent
     participant EA as EvaluationAgent
     participant NA as NegotiationAgent
     participant CT as CompletionTracker
     participant DA as DecisionAgent
-    participant ST as SwarmState
+    participant STT as SwarmState
 
     U->>S: send_message("CreateRequirement", payload, correlation_id)
     S->>B: Event.from_message (message + correlation_id)
-    B->>ST: record event
+    B->>STT: record event
     B->>RA: step() → put_artifact(kind=requirement)
     RA->>B: publish(RequirementCreated, correlation_id)
+    B->>ST: step() → put_artifact(kind=strategy)
+    ST->>B: publish(StrategySelected, correlation_id)
     B->>SDA: step() → put_artifact(kind=supplier_list)
-    SDA->>ST: expect_artifact(evaluation, count=5) / expect_artifact(quote, count=5)
+    SDA->>STT: expect_artifact(evaluation, count=5) / expect_artifact(quote, count=5)
     SDA->>B: publish(SupplierDiscovered x5, correlation_id)
 
     loop For each supplier s
@@ -105,7 +112,8 @@ sequenceDiagram
     B->>CT: handler() counts artifacts per group
     CT->>B: publish(EvaluationCompleted, correlation_id) [once]
     CT->>B: publish(QuotesCompleted, correlation_id) [once]
-    B->>DA: step() → reads all quotes → put_artifact(kind=decision)
+    B->>DA: step() → reads all quotes → put_artifact(kind=decision, parent_ids=[...])
+    DA->>DA: put_artifact(kind=decision_explanation, parent_ids=[decision])
     DA->>B: publish(DecisionMade, correlation_id)
 ```
 
@@ -194,11 +202,47 @@ replaced, reordered, or replayed without coupling.
   routing / `drive_on_event` / `route_on_event`, and `step` raises
   `RuntimeError` if it was never set. Routing uses `route_on_event(route, state)`
   so a route-selected agent also sees the shared state.
-- **Deterministic domain layer** — the Phase 3 agents are pure, seed-based
-  adapters: the market, the supplier pool, the evaluation scores and the quotes
-  are all deterministic, so the same `CreateRequirement` message always yields
-  the same decision. Domain agents skip *replayed* events in `perceive`, so
-  audit-log replay never re-runs the flow.
+ - **Deterministic domain layer** — the Phase 4 agents are pure, seed-based
+   adapters: the market, the supplier pool, the evaluation scores, the quotes and
+   strategy selection are all deterministic, so the same `CreateRequirement`
+   message always yields the same strategy and the same decision. Domain agents
+   skip *replayed* events in `perceive`, so audit-log replay never re-runs the
+   flow.
+
+## Phase 4: strategy-based evaluation and auditable decisions
+
+The Phase 3 flow gained two deterministic, LLM-free concerns — what to
+optimize, and why a particular supplier won:
+
+- **Execution strategy** — `StrategyAgent` reacts to `RequirementCreated` and
+  picks a `Strategy` from the requirement's constraints via the pure
+  `select_strategy(constraints)` rule: a hard carbon constraint
+  (`max_carbon_per_unit`) selects `low_carbon`; a tight budget (below half of
+  `quantity * max_unit_price`) selects `cost_optimized`; otherwise `balanced`.
+  The strategy is written as a `StrategyArtifact` (its three weights, which sum to
+  1.0) and announced with `StrategySelected`.
+- **Strategy-gated discovery** — `SupplierDiscoveryAgent` now subscribes to
+  `StrategySelected` rather than `RequirementCreated`, so the supplier pool and
+  its completion expectations are only created *after* the strategy artifact
+  exists. Because the event bus delivers events concurrently, this gate removes
+  the race where evaluation could run before the weights it depends on. In the
+  `balanced` strategy the weights reproduce the Phase 3 composite scores
+  exactly; when no strategy artifact is present an evaluation falls back to
+  `balanced`, so existing score assertions are preserved.
+- **Weighted evaluation** — `EvaluationAgent` blends the price, quality and
+  carbon sub-scores from the existing `MultiCriteriaEvaluator` with the active
+  strategy's weights, recording the strategy used in each `EvaluationArtifact`.
+- **Auditable decision reasoning** — `DecisionAgent` produces, alongside the
+  `DecisionArtifact`, a `DecisionExplanationArtifact` (`selected_supplier`,
+  `strategy_used`, `top_factors`, and a `rejected_suppliers` list with a
+  deterministic textual reason for every non-selected supplier derived from the
+  policy engine's rejection reason and score/price ordering).
+
+This keeps the runtime deterministic and LLM-free while making *what* is
+optimized and *why* it was chosen explicit and traceable through the same
+artifact/event lineage.
+
+## Phase 2 data flow
 - **Completion tracking** — `SwarmState.expect_artifact(kind, count=..., correlation_id=...)`
   declares group sizes; `CompletionTracker` (subscribed to every event, ignoring
   replayed ones) closes a group once the expected artifact count exists and
@@ -211,9 +255,10 @@ replaced, reordered, or replayed without coupling.
 
 ## Outlook
 
-Phase 3 is complete: the five deterministic agents run the procurement flow end
+Phase 4 is complete: the six deterministic agents run the procurement flow end
 to end on the runtime spine with parallel, per-supplier steps gated by
-completion tracking. What is deliberately left for later:
+completion tracking, plus explicit strategy selection and auditable decision
+reasoning. What is deliberately left for later:
 
 - **Live integration** — replace the seeded `MarketSimulator` reference with the
   live market feed and wire `DecisionMade` into the ledger / API, so the swarm

@@ -9,6 +9,11 @@ Phase 3: the agent reacts to each ``SupplierDiscovered`` event individually and
 publishes one ``SupplierEvaluated`` event per supplier, so suppliers are
 evaluated as soon as they are discovered — the evaluation stage runs in
 parallel instead of waiting for the whole pool.
+
+Phase 4: the composite score is blended with the strategy weights from the
+:class:`StrategyArtifact` (price / score / carbon). The ``balanced`` strategy
+reproduces the Phase 3 scoring exactly; when no strategy artifact exists the
+balanced strategy is assumed (unit tests, direct drives).
 """
 
 from typing import Any, cast
@@ -22,9 +27,14 @@ from swarm.core.agent import BaseAgent
 from swarm.core.capability import Capability
 from swarm.core.event import Event
 from swarm.core.state import SwarmState
-from swarm.domain.artifacts import SUPPLIER_LIST_ARTIFACT_NAME, EvaluationArtifact
+from swarm.domain.artifacts import (
+    STRATEGY_ARTIFACT_NAME,
+    SUPPLIER_LIST_ARTIFACT_NAME,
+    EvaluationArtifact,
+)
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.pricing import bid_bond_amount, carbon_footprint, floor_price, lead_time_days
+from swarm.domain.strategy import BALANCED_STRATEGY, DEFAULT_STRATEGIES, Strategy
 
 logger = structlog.get_logger(__name__)
 
@@ -58,6 +68,12 @@ class EvaluationAgent(BaseAgent):
                 else dict(settings.evaluation.esg_baselines)
             ),
         )
+        # Legacy weights used to derive the quality sub-score from the
+        # lead-time and reliability components of the core evaluator.
+        legacy = settings.evaluation.scoring_weights
+        self._lead_time_weight = float(legacy.get("lead_time", 0.25))
+        self._reliability_weight = float(legacy.get("reliability", 0.15))
+        self._quality_weight_total = self._lead_time_weight + self._reliability_weight
         self._correlation_id: str | None = None
         self._list_artifact: str = SUPPLIER_LIST_ARTIFACT_NAME
         self._supplier_id: str = ""
@@ -92,18 +108,35 @@ class EvaluationAgent(BaseAgent):
         session_id = (self._correlation_id or "procurement")[:32]
         index = self._supplier_index(pool, self._supplier_id)
 
+        strategy = self._read_strategy(state)
         bid = self._synthetic_bid(supplier, quantity, target_lead, index, session_id)
-        score = self._evaluator.score_bid(bid, spot, target_lead, material, quantity)
+        price = self._evaluator._score_price(bid.unit_price, spot)
+        lead_time = self._evaluator._score_lead_time(bid.lead_time_days, target_lead)
+        esg = self._evaluator._score_esg(bid.carbon_footprint_kg, material, quantity)
+        reliability = self._evaluator._score_reliability(bid.reliability_score)
+        quality = self._quality_score(lead_time, reliability)
+
+        score = round(
+            strategy.price_weight * price
+            + strategy.score_weight * quality
+            + strategy.carbon_weight * esg,
+            4,
+        )
         breakdown = {
-            "price": self._evaluator._score_price(bid.unit_price, spot),
-            "lead_time": self._evaluator._score_lead_time(bid.lead_time_days, target_lead),
-            "esg": self._evaluator._score_esg(bid.carbon_footprint_kg, material, quantity),
-            "reliability": self._evaluator._score_reliability(bid.reliability_score),
+            "price": price,
+            "lead_time": lead_time,
+            "esg": esg,
+            "reliability": reliability,
+            "quality": quality,
         }
         self._evaluation = {
             "supplier_id": self._supplier_id,
             "score": score,
             "breakdown": breakdown,
+            "strategy": {
+                "strategy_name": strategy.name,
+                "weights": strategy.as_weights(),
+            },
             "bid": bid.model_dump(),
         }
         logger.info(
@@ -112,8 +145,28 @@ class EvaluationAgent(BaseAgent):
             phase="supplier_evaluated",
             supplier_id=self._supplier_id,
             score=score,
+            strategy=strategy.name,
             correlation_id=self._correlation_id,
         )
+
+    def _quality_score(self, lead_time: float, reliability: float) -> float:
+        """Blend lead time and reliability into a single quality sub-score.
+
+        Uses the relative legacy weights, so the ``balanced`` strategy's
+        ``score_weight * quality`` exactly reproduces the Phase 3 composite.
+        """
+        return (
+            self._lead_time_weight * lead_time + self._reliability_weight * reliability
+        ) / self._quality_weight_total
+
+    @staticmethod
+    def _read_strategy(state: SwarmState) -> Strategy:
+        """The active strategy artifact, defaulting to balanced."""
+        artifact = state.get_artifact(STRATEGY_ARTIFACT_NAME)
+        if artifact is None:
+            return BALANCED_STRATEGY
+        name = str(artifact.data.get("strategy_name") or "balanced")
+        return DEFAULT_STRATEGIES.get(name, BALANCED_STRATEGY)
 
     async def act(self, state: SwarmState) -> None:
         if not self._pending or self._evaluation is None:

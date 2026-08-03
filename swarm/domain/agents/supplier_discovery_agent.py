@@ -9,6 +9,12 @@ per supplier, so evaluation can start on the first discovery instead of waiting
 for the whole pool. It also declares the per-request completion expectations
 for evaluation and quote artifacts (both sized to the pool), which the
 :class:`CompletionTracker` uses to fire the phase-gate events.
+
+Phase 4: discovery triggers on ``StrategySelected`` (not ``RequirementCreated``)
+so the pool and its completion expectations are only created after the
+:class:`StrategyArtifact` exists — otherwise the concurrent event bus could let
+evaluation run before the strategy that weights it. ``RequirementCreated`` is
+kept as a fallback for direct unit-test drives, where no strategy flow runs.
 """
 
 from typing import Any
@@ -22,6 +28,7 @@ from swarm.core.event import Event
 from swarm.core.state import SwarmState
 from swarm.domain.artifacts import (
     REQUIREMENT_ARTIFACT_NAME,
+    STRATEGY_ARTIFACT_NAME,
     SupplierListArtifact,
 )
 from swarm.domain.events import ProcurementEventType
@@ -98,15 +105,26 @@ class SupplierDiscoveryAgent(BaseAgent):
         super().__init__()
         self._correlation_id: str | None = None
         self._requirement_artifact: str = REQUIREMENT_ARTIFACT_NAME
+        self._strategy_artifact: str | None = None
         self._pool: dict[str, Any] | None = None
         self._pending = False
+        self._discovered_for: set[str] = set()
 
     async def perceive(self, event: Event) -> None:
         if event.replayed:
             return
-        if event.type == ProcurementEventType.REQUIREMENT_CREATED:
+        if event.type == ProcurementEventType.STRATEGY_SELECTED:
             self._pending = True
             self._correlation_id = event.correlation_id
+            self._strategy_artifact = str(
+                event.payload.get("artifact", STRATEGY_ARTIFACT_NAME)
+            )
+        elif event.type == ProcurementEventType.REQUIREMENT_CREATED:
+            if event.correlation_id in self._discovered_for:
+                return
+            self._pending = True
+            self._correlation_id = event.correlation_id
+            self._strategy_artifact = None
             self._requirement_artifact = str(
                 event.payload.get("artifact", REQUIREMENT_ARTIFACT_NAME)
             )
@@ -114,7 +132,15 @@ class SupplierDiscoveryAgent(BaseAgent):
     async def reason(self, state: SwarmState) -> None:
         if not self._pending:
             return
+        if self._correlation_id is None or self._correlation_id in self._discovered_for:
+            self._pending = False
+            return
         requirement = state.get_artifact(self._requirement_artifact)
+        if requirement is None and self._strategy_artifact is not None:
+            strategy = state.get_artifact(self._strategy_artifact)
+            if strategy is not None and strategy.parent_ids:
+                self._requirement_artifact = strategy.parent_ids[0]
+                requirement = state.get_artifact(self._requirement_artifact)
         if requirement is None:
             self._pending = False
             return
@@ -182,6 +208,8 @@ class SupplierDiscoveryAgent(BaseAgent):
                     correlation_id=self._correlation_id,
                 )
             )
+        if self._correlation_id is not None:
+            self._discovered_for.add(self._correlation_id)
         self._pending = False
         self._pool = None
 
