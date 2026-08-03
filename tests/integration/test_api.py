@@ -120,3 +120,66 @@ async def test_supplier_profile_endpoint(client):
 async def test_supplier_similar_endpoint(client):
     response = await client.get("/suppliers/similar")
     assert response.status_code == 503  # vector store not wired in tests
+
+
+# ─── Deterministic swarm trace endpoints ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_dispatch_swarm_requirement_returns_traceable_ids(client):
+    response = await client.post(
+        "/swarm/requirements",
+        json={"material": "aluminum", "quantity": 1000, "budget": 2_000_000.0},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["request_id"].startswith("REQ-")
+    assert data["correlation_id"].endswith("-CONV")
+    assert data["decision"]["selected_supplier"] == "MinerCorp_A"
+    assert data["completions"] == {
+        data["correlation_id"]: ["evaluation", "quote"],
+    }
+    assert data["event_count"] > 0
+    assert data["artifact_count"] >= 5
+
+
+@pytest.mark.asyncio
+async def test_get_swarm_execution_trace(client):
+    dispatch = await client.post(
+        "/swarm/requirements",
+        json={"material": "aluminum", "quantity": 1000},
+    )
+    request_id = dispatch.json()["request_id"]
+
+    response = await client.get(f"/swarm/trace/{request_id}")
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["correlation_id"].endswith("-CONV")
+    assert any(event["type"] == "QuoteGenerated" for event in trace["events"])
+    assert any(action["action"] == "artifact_created" for action in trace["agent_actions"])
+    assert any(artifact["kind"] == "quote" for artifact in trace["artifacts"])
+
+
+@pytest.mark.asyncio
+async def test_get_swarm_completions_and_state(client):
+    dispatch = await client.post(
+        "/swarm/requirements",
+        json={"material": "steel", "quantity": 500, "budget": 500_000.0},
+    )
+    request_id = dispatch.json()["request_id"]
+    correlation_id = dispatch.json()["correlation_id"]
+
+    completions = await client.get(f"/swarm/trace/{request_id}/completions")
+    assert completions.status_code == 200
+    assert completions.json()["completions"][correlation_id] == ["evaluation", "quote"]
+
+    state = await client.get(f"/swarm/state/{request_id}")
+    assert state.status_code == 200
+    assert state.json()["request_id"] == request_id
+    assert state.json()["completions"][correlation_id] == ["evaluation", "quote"]
+
+
+@pytest.mark.asyncio
+async def test_swarm_trace_unknown_request_id_returns_404(client):
+    response = await client.get("/swarm/trace/DOES-NOT-EXIST")
+    assert response.status_code == 404

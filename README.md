@@ -21,6 +21,7 @@
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Architecture](#architecture)
+- [Swarm Architecture](#swarm-architecture)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -140,8 +141,106 @@ INIT → RFQ_BROADCAST → BID_COLLECTION → EVALUATION → SHORTLIST_BARTER �
 ```
 INIT → OFFER_RECEIVED → COUNTER_SENT → OFFER_RECEIVED → ACCEPTED
               ↓                ↓
-           REJECTED        TIMEOUT
+            REJECTED        TIMEOUT
 ```
+
+---
+
+## Swarm Architecture
+
+The repository also ships a self-contained **swarm runtime** (`swarm/`) as the
+foundation for autonomous multi-agent procurement. It is intentionally
+deterministic and rule-based — no planning, no LLM. A **domain layer**
+(`swarm/domain/`) adapts the existing `core/` procurement logic (RFQ
+normalization, market simulation, multi-criteria scoring, the policy engine)
+into five agents that cooperate over the event bus.
+
+The flow is **parallel and per-supplier** (Phase 3): discovery announces each
+supplier individually, evaluation and negotiation run one specialized step per
+supplier, and a completion tracker gates the decision until every expected
+evaluation and quote artifact exists.
+
+```mermaid
+flowchart LR
+    USER[User Request] --> SWARM[Swarm facade]
+    SWARM -->|CreateRequirement message| RA[RequirementAgent]
+    RA -->|RequirementCreated event| BUS[Event Bus]
+    BUS --> SDA[SupplierDiscoveryAgent]
+    SDA -->|SupplierDiscovered x5| EAV[EvaluationAgent]
+    EAV -->|SupplierEvaluated x5| NA[NegotiationAgent]
+    NA -->|QuoteGenerated x5| BUS
+    EAV --> CT[CompletionTracker]
+    NA --> CT
+    CT -->|QuotesCompleted| DA[DecisionAgent]
+    RA --> STATE[(Shared SwarmState)]
+    SDA --> STATE
+    EAV --> STATE
+    NA --> STATE
+    DA --> STATE
+```
+
+The four pillars:
+
+| Pillar | Module | Responsibility |
+|--------|--------|----------------|
+| **Agents** | `swarm/core/agent.py` | `BaseAgent` with a `perceive → reason → act` lifecycle, unique name, capabilities, tags and status |
+| **Events** | `swarm/core/event.py` | `Event` + async `EventBus`; agents communicate only by publishing/consuming events, never by holding references to each other |
+| **Coordinator** | `swarm/core/__init__.py` | Public `Swarm` facade: register agents, route events, maintain shared state |
+| **Shared State** | `swarm/core/state.py` | Serializable `SwarmState` of typed `Artifact`s (with `parent_ids` lineage), events, completion expectations and results that every agent can read and mutate |
+
+A more detailed walkthrough — including sequence diagrams and the hardening
+guarantees (`correlation_id`, event replay, capability schema, structured
+logging) — lives in [docs/swarm-architecture.md](docs/swarm-architecture.md).
+
+Phase 3 demo — one `CreateRequirement` message fans out through the five
+deterministic agents to a final supplier decision:
+
+```bash
+python -m examples.procurement_swarm_demo
+```
+
+1. A `CreateRequirement` message reaches the swarm and the requirement agent
+   normalizes it (RFQ defaults, market-derived price cap) into a requirement
+   artifact, then announces `RequirementCreated`.
+2. The supplier discovery agent perceives that event, samples the deterministic
+   market (`MarketSimulator(seed=42)`), declares the expected evaluation/quote
+   counts, publishes the five-supplier pool and announces one
+   `SupplierDiscovered` event per supplier.
+3. Each `SupplierDiscovered` is routed to the evaluation agent, which scores
+   that supplier and announces `SupplierEvaluated`; the negotiation agent turns
+   each evaluation into a deterministic `QuoteGenerated`. The `CompletionTracker`
+   fires `EvaluationCompleted` / `QuotesCompleted` once every expected artifact
+   for the conversation exists.
+4. The decision agent reacts only to `QuotesCompleted`, filters the quotes
+   through the policy engine and picks the winner — all within one
+   `correlation_id`.
+
+The `Swarm` facade exposes the read-only execution trace:
+
+```python
+from swarm.domain.wiring import build_procurement_swarm
+
+swarm = build_procurement_swarm(request_id="REQ-002", goal="Source aluminum")
+await swarm.start()
+await swarm.send_message("CreateRequirement", {...}, correlation_id="REQ-002-CONV")
+await swarm.shutdown()
+
+trace = swarm.get_execution_trace("REQ-002-CONV")  # events, artifacts, agent_actions
+```
+
+Phase 1 runtime demo (runtime primitives only):
+
+```bash
+python -m examples.run_swarm_demo
+```
+
+Tests: `tests/unit/test_agent.py`, `tests/unit/test_event.py`,
+`tests/unit/test_registry.py`, `tests/unit/test_coordinator.py`,
+`tests/unit/test_swarm_core.py`, `tests/unit/test_completion.py`,
+`tests/unit/test_requirement_agent.py`, `tests/unit/test_supplier_agent.py`,
+`tests/unit/test_evaluation_agent.py`, `tests/unit/test_negotiation_agent.py`,
+`tests/unit/test_decision_agent.py`,
+`tests/unit/test_full_procurement_flow.py`.
 
 ---
 
@@ -428,6 +527,66 @@ Find behaviorally similar suppliers via pgvector.
 }
 ```
 
+### `POST /swarm/requirements`
+
+Dispatch a requirement into the deterministic Phase 3 swarm (no LLM) and run
+the full parallel flow to a decision.
+
+**Request:**
+```json
+{
+  "material": "aluminum",
+  "quantity": 1000,
+  "budget": 2000000.0,
+  "target_lead_time_days": 30
+}
+```
+
+**Response:**
+```json
+{
+  "request_id": "REQ-3F9A2C1B",
+  "correlation_id": "REQ-3F9A2C1B-CONV",
+  "decision": {
+    "selected_supplier": "MinerCorp_A",
+    "ranked": [{"supplier_id": "MinerCorp_A", "score": 0.858, "price": 984.0}]
+  },
+  "completions": {"REQ-3F9A2C1B-CONV": ["evaluation", "quote"]},
+  "event_count": 31,
+  "artifact_count": 12
+}
+```
+
+### `GET /swarm/trace/{request_id}`
+
+Read-only execution trace (events, artifacts, agent actions) for one swarm run.
+
+**Response:**
+```json
+{
+  "correlation_id": "REQ-3F9A2C1B-CONV",
+  "events": [
+    {"type": "CreateRequirement", "source": "user", "correlation_id": "REQ-3F9A2C1B-CONV"},
+    {"type": "SupplierEvaluated", "source": "evaluation_agent", "correlation_id": "REQ-3F9A2C1B-CONV"}
+  ],
+  "artifacts": [
+    {"kind": "evaluation", "name": "evaluation_MinerCorp_A", "score": 0.858}
+  ],
+  "agent_actions": [
+    {"agent": "evaluation_agent", "action": "artifact_created", "kind": "evaluation"},
+    {"agent": "evaluation_agent", "action": "event_published", "event_type": "SupplierEvaluated"}
+  ]
+}
+```
+
+### `GET /swarm/trace/{request_id}/completions`
+
+Completion groups closed per correlation id for a swarm run.
+
+### `GET /swarm/state/{request_id}`
+
+Full serialized, read-only snapshot of a swarm run's shared state.
+
 ---
 
 ## CLI Usage
@@ -458,6 +617,7 @@ pytest tests/ --cov=core --cov=api --cov-report=html
 # Specific modules
 pytest tests/unit/test_scoring.py -v
 pytest tests/unit/test_bilateral.py -v
+pytest tests/unit/test_swarm_core.py tests/unit/test_coordinator.py -v
 pytest tests/integration/test_api.py -v
 pytest tests/integration/test_load.py -v
 ```

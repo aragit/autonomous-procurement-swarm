@@ -20,6 +20,9 @@ from core.memory.heuristics import HeuristicReservationEstimator
 from core.memory.semantic import PgVectorMemoryStore
 from core.protocol.auction_orchestrator import AuctionOrchestrator
 from core.protocol.policy_engine import PolicyContext, PolicyEngine
+from swarm import SwarmState
+from swarm.domain.events import CREATE_REQUIREMENT_INTENT
+from swarm.domain.wiring import build_procurement_swarm
 
 # Configure logging at import time
 configure_logging()
@@ -34,6 +37,10 @@ DB_URL = os.getenv(
 ledger: PostgresLedgerRepository | None = None
 shared_memory: HeuristicReservationEstimator | None = None
 shared_vector_store: PgVectorMemoryStore | None = None
+
+# Read-only swarm trace store: most recent wired-swarm executions by request_id.
+swarm_states: dict[str, SwarmState] = {}
+MAX_SWARM_STATES = 50
 
 
 @asynccontextmanager
@@ -87,6 +94,33 @@ class AuctionResponse(BaseModel):
     scored_bids: list[dict[str, Any]] = []
     shortlist: list[dict[str, Any]] = []
     bartering_result: dict[str, Any] | None = None
+
+
+class SwarmRequirementRequest(BaseModel):
+    """Payload for dispatching a requirement into the deterministic swarm."""
+
+    material: str = "aluminum"
+    quantity: int = Field(default=1000, gt=0)
+    budget: float = Field(default=2_000_000.0, gt=0)
+    target_lead_time_days: int = 30
+    goal: str | None = None
+
+    @field_validator("material")
+    @classmethod
+    def validate_material(cls, v: str) -> str:
+        valid = settings.negotiation.valid_materials
+        if v not in valid:
+            raise ValueError(f"material must be one of {valid} (got '{v}')")
+        return v
+
+
+class SwarmDispatchResponse(BaseModel):
+    request_id: str
+    correlation_id: str
+    decision: dict[str, Any] | None = None
+    completions: dict[str, list[str]]
+    event_count: int
+    artifact_count: int
 
 
 @app.get("/health")
@@ -259,6 +293,91 @@ async def find_similar_suppliers(supplier_id: str | None = None, n: int = 3) -> 
 
     similar = await shared_vector_store.query_similar_suppliers(query, n_results=n)
     return {"query_supplier_id": supplier_id, "similar": similar}
+
+
+# ─── Deterministic swarm trace endpoints (read-only) ────────────────────────
+
+
+def _remember(state: SwarmState) -> None:
+    """Keep the most recent swarm states for read-only trace lookups."""
+    swarm_states[state.request_id] = state
+    while len(swarm_states) > MAX_SWARM_STATES:
+        swarm_states.pop(next(iter(swarm_states)))
+
+
+@app.post("/swarm/requirements", response_model=SwarmDispatchResponse)
+async def dispatch_swarm_requirement(
+    request: SwarmRequirementRequest,
+) -> SwarmDispatchResponse:
+    """Dispatch a requirement into the deterministic Phase 3 swarm.
+
+    Runs the full parallel flow (requirement → per-supplier discovery →
+    evaluation → quoting → completion-tracked decision) without any LLM, then
+    stores the resulting state so the trace endpoints below can serve it.
+    """
+    request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+    swarm = build_procurement_swarm(
+        request_id=request_id,
+        goal=request.goal or f"Source {request.quantity} units of {request.material}",
+    )
+    await swarm.start()
+    correlation_id = f"{request_id}-CONV"
+    await swarm.send_message(
+        CREATE_REQUIREMENT_INTENT,
+        {
+            "text": f"Source {request.quantity} units of {request.material}",
+            "material": request.material,
+            "quantity": request.quantity,
+            "budget": request.budget,
+            "target_lead_time_days": request.target_lead_time_days,
+        },
+        sender="user",
+        correlation_id=correlation_id,
+    )
+    await swarm.shutdown()
+    _remember(swarm.state)
+
+    decision = swarm.state.get_artifact("decision")
+    return SwarmDispatchResponse(
+        request_id=request_id,
+        correlation_id=correlation_id,
+        decision=decision.data if decision else None,
+        completions=swarm.state.completions,
+        event_count=len(swarm.state.events),
+        artifact_count=len(swarm.state.artifacts),
+    )
+
+
+def _swarm_state(request_id: str) -> SwarmState:
+    state = swarm_states.get(request_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"No swarm run for request_id {request_id}")
+    return state
+
+
+@app.get("/swarm/trace/{request_id}")
+async def get_swarm_execution_trace(request_id: str) -> dict[str, Any]:
+    """Read-only execution trace for one swarm conversation."""
+    state = _swarm_state(request_id)
+    correlation_ids = sorted(
+        {event.correlation_id for event in state.events if event.correlation_id}
+    )
+    cid = correlation_ids[0] if correlation_ids else request_id
+    return state.get_execution_trace(cid)
+
+
+@app.get("/swarm/trace/{request_id}/completions")
+async def get_swarm_completions(request_id: str) -> dict[str, Any]:
+    """Completion groups closed per correlation id for a swarm run."""
+    state = _swarm_state(request_id)
+    return {"request_id": request_id, "completions": state.completions}
+
+
+@app.get("/swarm/state/{request_id}")
+async def get_swarm_state(request_id: str) -> dict[str, Any]:
+    """Full serialized read-only snapshot of a swarm run's state."""
+    state = _swarm_state(request_id)
+    return state.to_dict()
 
 
 def _create_suppliers(material: str, spot_price: float, count: int = 5) -> list[SupplierAgent]:

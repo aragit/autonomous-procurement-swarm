@@ -38,10 +38,10 @@ jobs:
           pip install -e ".[dev]"
       
       - name: Lint with ruff
-        run: ruff check core/ api/ tests/ scripts/
+        run: ruff check core/ api/ swarm/ examples/ tests/ scripts/
       
       - name: Type check with mypy
-        run: mypy core/ api/ --ignore-missing-imports
+        run: mypy core/ api/ swarm/ examples/ --ignore-missing-imports
       
       - name: Run tests
         env:

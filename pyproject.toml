@@ -43,7 +43,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["core", "api", "configs"]
+packages = ["core", "api", "configs", "swarm"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "configs/base.yaml" = "configs/base.yaml"
