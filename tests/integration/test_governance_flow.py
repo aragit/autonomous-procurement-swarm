@@ -10,11 +10,14 @@ Three scenarios:
   * CRITICAL  -> extreme purchase + poor history   -> REJECTED (no authorization)
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from swarm import Event, SwarmState
 from swarm.core.artifact import Artifact
 from swarm.domain import CREATE_REQUIREMENT_INTENT
+from swarm.domain.contracts import Contract, ContractStatus
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.risk import RiskLevel
 from swarm.domain.supplier import SupplierPerformance
@@ -269,3 +272,88 @@ async def test_critical_risk_is_rejected() -> None:
     assert state.get_artifact("execution_authorization") is None
     rejected = [e for e in state.events if e.type == ProcurementEventType.APPROVAL_REJECTED]
     assert len(rejected) == 1
+
+
+@pytest.mark.asyncio
+async def test_contract_rejection_short_circuits_to_rejected_governance() -> None:
+    """The contract pre-gate is a HARD GATE (pre-risk).
+
+    DecisionMade -> ContractRejected -> GovernanceDecision(REJECTED):
+      - a valid-looking decision is still rejected because its supplier contract
+        is expired;
+      - risk is never assessed (RiskAssessmentAgent only subscribes to
+        ContractValidated);
+      - the rejected governance decision flows to approval, which publishes
+        ApprovalRejected and produces NO execution authorization, purchase order
+        or execution status.
+    """
+    expired = datetime.now(UTC) - timedelta(days=1)
+    expired_contract = Contract(
+        contract_id="C-REJ-01",
+        supplier_id="MinerCorp_A",
+        allowed_items=["aluminum"],
+        pricing_rules=[],
+        expiry_date=expired.isoformat(),
+        compliance_flags={"active"},
+        status=ContractStatus.ACTIVE,
+    )
+
+    store = SupplierMemoryStore()
+    swarm = build_procurement_swarm(
+        request_id="REQ-GOV-REJ",
+        goal="contract-rejected procurement",
+        supplier_memory=store,
+        contracts={"MinerCorp_A": expired_contract},
+        require_contract=True,
+    )
+    await swarm.start()
+    state = swarm.state
+    seed_context(state)
+    await swarm.dispatch(
+        Event(
+            type=ProcurementEventType.DECISION_MADE,
+            source="decision_agent",
+            payload={
+                "artifact": "decision",
+                "selected_supplier": "MinerCorp_A",
+                "decision_id": DECISION_ID,
+            },
+            correlation_id="REQ-GOV-REJ-CONV",
+        )
+    )
+    await swarm.shutdown()
+
+    events = [e.type for e in state.events]
+
+    # The contract gate rejected the decision.
+    assert ProcurementEventType.CONTRACT_REJECTED in events
+    cv = state.get_artifact("contract_validation")
+    assert cv is not None
+    assert cv.data["valid"] is False
+    assert "not active" in cv.data["reason"]
+    assert cv.parent_ids == [DECISION_ID]
+
+    # Contract = HARD GATE (pre-risk): no risk assessment is ever produced.
+    assert state.get_artifact("risk_assessment") is None
+    assert ProcurementEventType.RISK_ASSESSMENT_COMPLETED not in events
+
+    # Governance still runs on the rejection and emits a REJECTED decision.
+    governance = state.get_artifact("governance_decision")
+    assert governance is not None
+    assert governance.data["status"] == "REJECTED"
+    assert governance.data["required_approver"] is None
+
+    # Approval publishes a rejection but no authorization artifact is created.
+    assert state.get_artifact("execution_authorization") is None
+    rejected = [
+        e for e in state.events if e.type == ProcurementEventType.APPROVAL_REJECTED
+    ]
+    assert len(rejected) == 1
+    assert rejected[0].payload["authorization_status"] == "rejected"
+    assert ProcurementEventType.APPROVAL_GRANTED not in events
+
+    # Nothing past the gate could ever execute.
+    assert state.get_artifact("purchase_order") is None
+    assert state.get_artifact("execution_status") is None
+    assert ProcurementEventType.PURCHASE_ORDER_CREATED not in events
+    assert ProcurementEventType.EXECUTION_STATUS_UPDATED not in events
