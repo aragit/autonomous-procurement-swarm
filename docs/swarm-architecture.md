@@ -85,6 +85,7 @@ flowchart TB
 | **Contracts model** | `swarm/domain/contracts.py` | Deterministic `Contract` (supplier coverage, allowed items, pricing caps, expiry/compliance) with a pure `validate(...)` → `(valid, reason)` |
 | **Integration layer** | `swarm/integrations/` | `BaseConnector` port (`swarm/integrations/base.py` + `ExternalResponse`/`ExternalStatus`), deterministic `MockConnector`, stateless `SupplierAPIConnector`, and ERP adapters (`SAPConnector`, `OracleConnector`, `CoupaConnector`); config-driven `ConnectorConfig` + `build_connector` factory (`swarm/integrations/factory.py`) selects the adapter per environment (`PROCUREMENT_CONNECTOR_PROVIDER`/`PROCUREMENT_CONNECTOR_MODE`) |
 | **Idempotency** | `swarm/utils/idempotency.py` | `IdempotencyGuard` — deterministic `(decision_id, action)` deduplication of external side effects |
+| **Timeline** | `swarm/core/timeline.py` | Read-only, deterministic projection `build_timeline(state)`; merges a run's events + artifacts into a causally-ordered `TimelineResponse` (timestamp primary, stable per-stream index tie-break), phase-tagged (`decision`|`contract`|`risk`|`governance`|`execution`|…), with `parent_ids` lineage and sensitive payload fields masked; served by `GET /swarm/timeline/{request_id}`. Never re-runs logic or mutates state |
 | **Pricing helpers** | `swarm/domain/pricing.py` | Deterministic floor price, lead time, carbon, bid bond (mirrors `core.agents.supplier` rules) |
 | **Risk model** | `swarm/domain/risk.py` | Deterministic `RiskAssessment` with financial / delivery / quality / carbon sub-scores, `RiskLevel`, and `compute_risk_scores` / `classify_risk` |
 | **Governance model** | `swarm/domain/governance.py` | `GovernancePolicy` (`standard_policy`, `strict_policy`) and deterministic `GovernanceDecision.from_risk` (`APPROVED` / `APPROVAL_REQUIRED` / `REJECTED`) |
@@ -356,7 +357,7 @@ Full lifecycle lineage: `... → ExecutionAuthorizationArtifact →
 PurchaseOrderArtifact → ExecutionStatusArtifact → ProcurementOutcomeArtifact →
 SupplierPerformanceArtifact`.
 
-## Phase 8: Enterprise Integration Layer (in progress)
+## Phase 8: Enterprise Integration Layer (released: v0.8)
 
 Phase 7 turned an authorized decision into a deterministic order and tracked it.
 Phase 8 is the boundary crossing into *real external systems* — **without**
@@ -396,6 +397,31 @@ New API: `GET /swarm/external/{request_id}` (external-call audit trail) and
 /swarm/{request_id}/execute` now routes through the base connector and reports its
 external calls. `build_procurement_swarm` gains `base_connector`, `contracts` and
 `require_contract` parameters.
+
+## Phase 8.1: Runtime Configuration & Observability (in progress)
+
+Hardening the v0.8 boundary so the *same* swarm runs against a different external
+system per environment with no code changes, and so a run's full story is readable
+in one pass — the observability lens that will keep the upcoming LLM (v0.9) layer
+safe.
+
+- **Config-driven connector selection** — `swarm/integrations/factory.py`
+  (`ConnectorConfig(provider, mode, endpoint?, credentials?)` +
+  `build_connector(config) -> BaseConnector`). `provider` selects `mock |
+  supplier_api | sap | oracle | coupa`; `mode: sandbox | prod` drives
+  `environment`/`live`; `credentials` is operator-supplied data (never hardcoded).
+  `build_connector_from_env()` / `get_connector_config_from_env()` read
+  `PROCUREMENT_CONNECTOR_PROVIDER` / `PROCUREMENT_CONNECTOR_MODE`, so DEV→`Mock`,
+  STAGING→`SupplierAPI`, PROD→`Coupa` is a deployment switch. The `/swarm/requirements`,
+  `/execute` and `/sync` endpoints resolve their connector this way, and `/sync`
+  accepts a runtime `connector` override for any supported provider (unknown → 400).
+- **Causal timeline** — `GET /swarm/timeline/{request_id}`
+  (`swarm/core/timeline.py`) is a read-only projection that merges the run's events
+  and artifacts into one deterministic stream (timestamp primary, stable per-stream
+  index as the tie-break), normalized with phase markers
+  (`discovery | evaluation | decision | contract | risk | governance | execution |
+  outcome`), `parent_ids` lineage and sensitive payload fields masked. Derived
+  `status` + summary counts. It never re-runs logic and never mutates state.
 
 ## Phase 5: deterministic supplier intelligence and outcome feedback
 
@@ -452,8 +478,12 @@ What is deliberately left for later:
   the governance tail (`GET /swarm/risk/{request_id}`,
   `GET /swarm/governance/{request_id}`, `POST /swarm/{request_id}/approve`), the
   execution tier (`POST /swarm/{request_id}/execute`,
-  `GET /swarm/order/{request_id}`, `GET /swarm/execution/{request_id}`), and trace
-  reads (`GET /swarm/trace/{request_id}`, `/completions`, `/swarm/state/{request_id}`).
+  `GET /swarm/order/{request_id}`, `GET /swarm/execution/{request_id}`), trace
+  reads (`GET /swarm/trace/{request_id}`, `/completions`, `/swarm/state/{request_id}`),
+  the external-call audit trail (`GET /swarm/external/{request_id}`,
+  `POST /swarm/{request_id}/sync`), the causal timeline
+  (`GET /swarm/timeline/{request_id}`), and config-driven connector selection
+  over `POST /swarm/{request_id}/sync`'s `connector` override.
 - **Planning** — an explicit planner (task decomposition, capability routing via
   `best_for_capability()`) that assembles the agent chain from intent rather than
   a hard-coded registration order; specialist evaluators tagged by region or

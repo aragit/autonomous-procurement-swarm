@@ -31,6 +31,16 @@ Added:
   a hard gate — `DecisionMade` → `ContractRejected` → `GovernanceDecision(REJECTED)`
   with **no** `RiskAssessment`, `ExecutionAuthorization`, purchase order or execution
   status, and an `ApprovalRejected` event is published.
+- Timeline endpoint `GET /swarm/timeline/{request_id}` (`swarm/core/timeline.py`):
+  a read-only, deterministic projection that merges that run's events and artifacts
+  into a single causally-ordered stream (timestamp primary, stable per-stream index
+  tie-break), normalized into a flat `TimelineItem` shape with phase markers
+  (`decision`|`contract`|`risk`|`governance`|`execution`|... ), lineage
+  (`parent_ids`), and sensitive payload fields masked. Summary counts + a terminal
+  `status` (`DELIVERED`/`APPROVED`/`REJECTED`/`incomplete`) are derived from the
+  stored state. Pure projection: never re-runs logic, never mutates, never calls an
+  external system. Covered by `tests/unit/test_timeline.py` and an end-to-end case in
+  `tests/integration/test_external_sync_api.py`.
 
 ## v0.8 — Enterprise Integration Layer (77ea476)
 

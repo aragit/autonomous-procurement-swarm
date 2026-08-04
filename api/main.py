@@ -21,6 +21,7 @@ from core.memory.semantic import PgVectorMemoryStore
 from core.protocol.auction_orchestrator import AuctionOrchestrator
 from core.protocol.policy_engine import PolicyContext, PolicyEngine
 from swarm import SwarmState
+from swarm.core.timeline import build_timeline
 from swarm.domain.agents import ApprovalAgent, ExecutionTrackingAgent, PurchaseOrderAgent
 from swarm.domain.artifacts import (
     EXECUTION_AUTHORIZATION_ARTIFACT_NAME,
@@ -423,6 +424,19 @@ async def get_swarm_state(request_id: str) -> dict[str, Any]:
     """Full serialized read-only snapshot of a swarm run's state."""
     state = _swarm_state(request_id)
     return state.to_dict()
+
+
+@app.get("/swarm/timeline/{request_id}")
+async def get_swarm_timeline(request_id: str) -> dict[str, Any]:
+    """Causally ordered, read-only timeline for one swarm run.
+
+    Merges that run's events and artifacts into a single stream sorted by
+    timestamp (with a stable, replay-deterministic tie-break), normalized into a
+    flat shape with phase markers and sensitive payload fields masked. Pure
+    projection — no agent logic is re-run and no external system is consulted.
+    """
+    state = _swarm_state(request_id)
+    return build_timeline(state).model_dump()
 
 
 class OutcomeRecordRequest(BaseModel):
