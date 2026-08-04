@@ -91,6 +91,7 @@ _ARTIFACT_PHASE: dict[str, str] = {
     "execution_status": "execution",
     "external_call": "execution",
     "llm": "cognitive",
+    "llm_consensus": "cognitive",
     "procurement_outcome": "outcome",
     "supplier_performance": "outcome",
 }

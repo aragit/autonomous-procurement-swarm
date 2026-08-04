@@ -20,10 +20,40 @@ from swarm.domain.artifacts import (
 from swarm.domain.strategy import DEFAULT_STRATEGIES
 from swarm.utils.llm_consensus import CONFIDENCE_THRESHOLD, compute_llm_consensus
 from swarm.utils.llm_hash import record_llm_artifact
+from swarm.utils.llm_memory import record_llm_consensus
 from swarm.utils.llm_reader import get_all_llm_completions
 from tests.unit.procurement_helpers import drive
 
 CORRELATION_ID = "REQ-LLM-CONSENSUS-CONV"
+
+
+def _seed_consensus_history(
+    state: SwarmState,
+    *,
+    rounds: int = 2,
+    price_delta: float = -0.05,
+    delivery_delta: float = 0.05,
+    correlation_id: str = CORRELATION_ID,
+) -> None:
+    """Pre-seed consensus history artifacts to simulate prior rounds."""
+    for round_num in range(1, rounds + 1):
+        consensus = {
+            "confidence": 0.95,
+            "agreement_score": 0.99,
+            "completeness": 1.0,
+            "num_completions": 3,
+            "aggregated_adjustments": {
+                "price_weight_delta": price_delta,
+                "delivery_weight_delta": delivery_delta,
+            },
+        }
+        record_llm_consensus(
+            state,
+            correlation_id=correlation_id,
+            consensus=consensus,
+            round_number=round_num,
+            by="test",
+        )
 
 
 def _requirement_event() -> Event:
@@ -223,7 +253,10 @@ async def test_strategy_with_high_confidence_applies_adjustments() -> None:
     state = SwarmState(request_id="REQ-HIGH-CONF", goal="strat")
     _seed_balanced_requirement(state)
 
-    # Pre-seed 3 completions with close (high-agreement) adjustments
+    # Pre-seed history: 2 stable prior rounds so temporal stability is high.
+    _seed_consensus_history(state, rounds=2)
+
+    # 3 completions with close (high-agreement) adjustments
     for variant, (p, d) in enumerate([(-0.05, 0.05), (-0.04, 0.04), (-0.06, 0.06)]):
         _seed_completion_with_output(state, _completion_output(p, d), variant=variant)
 
@@ -470,6 +503,10 @@ async def test_strategy_reads_multi_variant_completions() -> None:
     """The StrategyAgent can read and aggregate multi-variant completions."""
     state = SwarmState(request_id="REQ-MULTI-VARIANT", goal="strat")
     _seed_balanced_requirement(state)
+
+    # Pre-seed stable history so trust can exceed threshold.
+    _seed_consensus_history(state, rounds=2)
+
     for variant, (p, d) in enumerate([(-0.05, 0.05), (-0.04, 0.04), (-0.06, 0.06)]):
         _seed_completion_with_output(
             state, _completion_output(p, d), variant=variant

@@ -6,7 +6,8 @@ per-supplier multi-agent flow with a governance + execution tail:
 
 - ``RequirementAgent``  — listens for ``CreateRequirement`` messages
 - ``StrategyAgent``     — picks the execution strategy from the requirement and
-  publishes ``StrategySelected`` before any supplier is discovered
+  publishes ``StrategySelected`` before any supplier is discovered; also
+  re-evaluates LLM consensus on ``QuotesCompleted`` (temporal trust scoring)
 - ``SupplierDiscoveryAgent`` — publishes one ``SupplierDiscovered`` per supplier
   and declares the evaluation/quote completion expectations
 - ``EvaluationAgent``   — evaluates each discovered supplier (routed by the
@@ -130,7 +131,10 @@ def build_procurement_swarm(
     swarm.register(RequirementAgent(), event_types=[SwarmEventType.MESSAGE])
     swarm.register(
         StrategyAgent(),
-        event_types=[ProcurementEventType.REQUIREMENT_CREATED],
+        event_types=[
+            ProcurementEventType.REQUIREMENT_CREATED,
+            ProcurementEventType.QUOTES_COMPLETED,
+        ],
     )
     swarm.register(
         SupplierDiscoveryAgent(),
