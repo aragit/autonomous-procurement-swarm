@@ -90,6 +90,7 @@ _ARTIFACT_PHASE: dict[str, str] = {
     "purchase_order": "execution",
     "execution_status": "execution",
     "external_call": "execution",
+    "llm": "cognitive",
     "procurement_outcome": "outcome",
     "supplier_performance": "outcome",
 }

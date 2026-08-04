@@ -456,3 +456,52 @@ class ContractValidationArtifact(Artifact):
 
     kind: Literal["contract_validation"] = "contract_validation"
     name: str = CONTRACT_VALIDATION_ARTIFACT_NAME
+
+
+LLM_ARTIFACT_NAME = "llm"
+LLM_KINDS = frozenset({"llm_prompt", "llm_completion", "llm_embedding"})
+
+
+def llm_artifact_name(kind: str, input_hash: str, variant: int | None = None) -> str:
+    """Stable artifact name for one LLM call, keyed by its deduplication hash.
+
+    ``variant`` differentiates multiple completion outputs for the same input
+    (multi-LLM consensus). It is part of the artifact *name* but NOT the
+    ``input_hash`` — all variants of the same call share one hash so the
+    consensus layer can group them.
+    """
+    if variant is not None:
+        return f"llm_{kind}_{input_hash}_v{variant}"
+    return f"llm_{kind}_{input_hash}"
+
+
+class LLMArtifact(Artifact):
+    """A recorded LLM invocation input/output pair (v0.9 Step 1).
+
+    This artifact records the *inputs and outputs* of an LLM call as a
+    deterministic, replay-safe snapshot — it does NOT invoke any LLM itself.
+    Agents store the prompt, model, and (deterministic) result so a run can be
+    audited and replayed without re-issuing calls to an external service.
+
+    ``data`` contract::
+
+        {
+            "kind": str,                        # "llm_prompt" | "llm_completion" | "llm_embedding"
+            "model": str,                       # e.g. "gpt-4o-mini", "text-embedding-3-small"
+            "input_hash": str,                  # SHA256 of canonicalized input (for dedup)
+            "prompt": str | None,               # the prompt text (no secrets; masked by timeline)
+            "parameters": {                     # model parameters
+                "temperature": float,
+                "max_tokens": int | None,
+                ...
+            },
+            # the deterministic LLM output (may be empty for embeddings)
+            "output": dict | str | None,
+            "timestamp": str,                   # ISO-8601 UTC
+        }
+
+    ``tags``: ``{"model": <model>, "kind": <llm_kind>}``.
+    """
+
+    kind: Literal["llm"] = "llm"
+    name: str

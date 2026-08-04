@@ -13,6 +13,7 @@ per-supplier multi-agent flow with a governance + execution tail:
   ``supplier.evaluate`` capability, so specialized evaluators can compete)
 - ``NegotiationAgent``  — quotes each evaluated supplier
 - ``DecisionAgent``     — decides only after ``QuotesCompleted`` fires
+- ``SupplierAnalysisLLMAgent`` — read-only LLM supplier comparison (LLMArtifacts; cognitive phase)
 - ``RiskAssessmentAgent`` — assesses the selected decision (subscribes to ``ContractValidated``)
 - ``GovernanceAgent``   — applies governance policy to the risk assessment
   (also short-circuits a ``ContractRejected`` decision to REJECTED)
@@ -60,6 +61,7 @@ from swarm.domain.agents import (
     RequirementAgent,
     RiskAssessmentAgent,
     StrategyAgent,
+    SupplierAnalysisLLMAgent,
     SupplierDiscoveryAgent,
     SupplierIntelligenceAgent,
 )
@@ -147,6 +149,10 @@ def build_procurement_swarm(
     )
     swarm.register(
         DecisionAgent(),
+        event_types=[ProcurementEventType.QUOTES_COMPLETED],
+    )
+    swarm.register(
+        SupplierAnalysisLLMAgent(),
         event_types=[ProcurementEventType.QUOTES_COMPLETED],
     )
     swarm.register(

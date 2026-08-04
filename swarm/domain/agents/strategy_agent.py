@@ -6,7 +6,30 @@ carbon constraint yields ``low_carbon``, a tight budget yields
 ``cost_optimized``, otherwise ``balanced``. Publishes a ``StrategySelected``
 event and a :class:`StrategyArtifact` that the evaluation agent reads, so the
 strategy artifact always exists before any supplier is evaluated.
+
+v0.9 Step 3: the agent also reads any existing ``llm_completion`` artifact
+(via :func:`swarm.utils.llm_reader.get_latest_llm_completion`) and attaches
+its signals as advisory ``llm_context`` on the :class:`StrategyArtifact`.
+This is non-authoritative: the strategy selection logic is unchanged — LLM
+data is context only, never logic input.
+
+v0.9 Step 4: the agent additionally reads ``suggested_adjustments`` from the
+LLM completion, validates them through
+:func:`swarm.utils.llm_validation.validate_strategy_adjustments`, and records
+the bounded result as ``adjusted_weights`` + ``llm_influence`` on the
+artifact. The base ``weights`` field remains the canonical strategy weights
+unchanged, so downstream agents are unaffected. This creates a safe audit
+trail of influence before any weight is ever honored.
+
+v0.9 Step 5: the agent aggregates all ``llm_completion`` artifacts via
+:func:`swarm.utils.llm_consensus.compute_llm_consensus` and only applies
+adjustments when the consensus ``confidence`` exceeds
+:data:`~swarm.utils.llm_consensus.CONFIDENCE_THRESHOLD` (0.7). Low-confidence
+LLM outputs produce zero influence — the system requires multi-model agreement
+before any suggestion is considered.
 """
+
+from typing import Any
 
 import structlog
 
@@ -17,6 +40,9 @@ from swarm.core.state import SwarmState
 from swarm.domain.artifacts import REQUIREMENT_ARTIFACT_NAME, StrategyArtifact
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.strategy import Strategy, select_strategy
+from swarm.utils.llm_consensus import CONFIDENCE_THRESHOLD, compute_llm_consensus
+from swarm.utils.llm_reader import get_all_llm_completions, get_latest_llm_completion
+from swarm.utils.llm_validation import validate_strategy_adjustments
 
 logger = structlog.get_logger(__name__)
 
@@ -38,6 +64,11 @@ class StrategyAgent(BaseAgent):
         self._correlation_id: str | None = None
         self._requirement_artifact: str = REQUIREMENT_ARTIFACT_NAME
         self._strategy: Strategy | None = None
+        self._llm_context: dict[str, Any] | None = None
+        self._validated_adjustments: dict[str, float] = {}
+        self._raw_adjustments: dict[str, Any] = {}
+        self._adjusted_weights: dict[str, float] | None = None
+        self._consensus: dict[str, Any] = {}
         self._pending = False
 
     async def perceive(self, event: Event) -> None:
@@ -50,6 +81,11 @@ class StrategyAgent(BaseAgent):
                 event.payload.get("artifact", REQUIREMENT_ARTIFACT_NAME)
             )
             self._strategy = None
+            self._llm_context = None
+            self._validated_adjustments = {}
+            self._raw_adjustments = {}
+            self._adjusted_weights = None
+            self._consensus = {}
 
     async def reason(self, state: SwarmState) -> None:
         if not self._pending:
@@ -60,21 +96,112 @@ class StrategyAgent(BaseAgent):
             return
         constraints = requirement.data.get("constraints", {})
         self._strategy = select_strategy(constraints)
+
+        # Advisory-only: read latest LLM completion output if one exists.
+        # The strategy selection logic above is NOT affected by this.
+        llm_output = get_latest_llm_completion(state, correlation_id=self._correlation_id)
+        completions = get_all_llm_completions(state, correlation_id=self._correlation_id)
+
+        # Compute consensus across all LLM completions (Step 5)
+        self._consensus = compute_llm_consensus(completions)
+
+        if llm_output is not None:
+            llm_risks = llm_output.get("risks", [])
+            risks = llm_risks if isinstance(llm_risks, list) else []
+            llm_tradeoffs = llm_output.get("tradeoffs", [])
+            tradeoffs = llm_tradeoffs if isinstance(llm_tradeoffs, list) else []
+            self._llm_context = {
+                "used": True,
+                "risk_hints": risks[:3],
+                "tradeoff_hints": tradeoffs[:3],
+                "adjustments_applied": (
+                    self._consensus.get("confidence", 0.0) >= CONFIDENCE_THRESHOLD
+                ),
+            }
+        else:
+            self._llm_context = {"used": False, "adjustments_applied": False}
+
+        # Gate: only apply adjustments if consensus confidence is high enough.
+        # The aggregated adjustments from consensus go through validation again
+        # (defense-in-depth) before being applied.
+        if self._consensus.get("confidence", 0.0) >= CONFIDENCE_THRESHOLD:
+            aggregated = self._consensus.get("aggregated_adjustments", {})
+            self._raw_adjustments = aggregated
+            self._validated_adjustments = validate_strategy_adjustments(
+                aggregated
+            )
+        else:
+            self._raw_adjustments = {}
+            self._validated_adjustments = {}
+
+        # Apply bounded adjustments to the strategy weights.
+        self._adjusted_weights = self._apply_adjustments()
+
         logger.info(
             "strategy_selected",
             agent=self.name,
             strategy_name=self._strategy.name,
+            llm_context_used=bool(llm_output),
+            llm_confidence=self._consensus.get("confidence", 0.0),
+            adjustments_applied=bool(self._validated_adjustments),
             correlation_id=self._correlation_id,
         )
+
+    def _apply_adjustments(self) -> dict[str, float]:
+        """Apply bounded LLM adjustments to the base strategy weights.
+
+        Maps ``delivery_weight_delta`` to ``score_weight`` (delivery time is
+        a component of the evaluation score). All weights are clamped to
+        [0, 1] and then normalized to sum to exactly 1.0.
+
+        The strategy NAME is never affected — only the numeric weights
+        carried on the artifact for consumers.
+        """
+        base = self._strategy.as_weights() if self._strategy is not None else {}
+        if not self._validated_adjustments or not base:
+            return base
+
+        price = base["price_weight"] + self._validated_adjustments.get(
+            "price_weight_delta", 0.0
+        )
+        score = base["score_weight"] + self._validated_adjustments.get(
+            "delivery_weight_delta", 0.0
+        )
+        carbon = base["carbon_weight"]
+
+        # Clamp each weight to [0, 1] (hard constraint: never negative)
+        price = max(0.0, min(1.0, price))
+        score = max(0.0, min(1.0, score))
+        carbon = max(0.0, min(1.0, carbon))
+
+        # Normalize so weights sum to exactly 1.0
+        total = price + score + carbon
+        if total <= 0.0:
+            return dict(base)
+        return {
+            "price_weight": price / total,
+            "score_weight": score / total,
+            "carbon_weight": carbon / total,
+        }
 
     async def act(self, state: SwarmState) -> None:
         if not self._pending or self._strategy is None:
             return
+        base_weights = self._strategy.as_weights()
         artifact = StrategyArtifact(
             data={
                 "strategy_name": self._strategy.name,
                 "description": self._strategy.description,
-                "weights": self._strategy.as_weights(),
+                "weights": base_weights,
+                "adjusted_weights": self._adjusted_weights or base_weights,
+                "llm_context": self._llm_context or {"used": False},
+                "llm_influence": {
+                    "used": bool(self._validated_adjustments),
+                    "raw_adjustments": self._raw_adjustments,
+                    "validated_adjustments": self._validated_adjustments,
+                    "adjustments_applied": bool(self._validated_adjustments),
+                    "llm_consensus": self._consensus,
+                },
             },
             parent_ids=[self._requirement_artifact],
             created_by=self.name,
@@ -102,3 +229,8 @@ class StrategyAgent(BaseAgent):
         )
         self._pending = False
         self._strategy = None
+        self._llm_context = None
+        self._validated_adjustments = {}
+        self._raw_adjustments = {}
+        self._adjusted_weights = None
+        self._consensus = {}

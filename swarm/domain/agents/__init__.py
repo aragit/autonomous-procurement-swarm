@@ -11,6 +11,7 @@ from swarm.domain.agents.decision_agent import DecisionAgent
 from swarm.domain.agents.evaluation_agent import EvaluationAgent
 from swarm.domain.agents.execution_agent import ExecutionTrackingAgent
 from swarm.domain.agents.governance_agent import GovernanceAgent
+from swarm.domain.agents.llm.supplier_analysis import SupplierAnalysisLLMAgent
 from swarm.domain.agents.negotiation_agent import NegotiationAgent
 from swarm.domain.agents.outcome_agent import OutcomeAgent
 from swarm.domain.agents.purchase_order_agent import PurchaseOrderAgent
@@ -33,6 +34,7 @@ __all__ = [
     "RequirementAgent",
     "RiskAssessmentAgent",
     "StrategyAgent",
+    "SupplierAnalysisLLMAgent",
     "SupplierDiscoveryAgent",
     "SupplierIntelligenceAgent",
 ]
