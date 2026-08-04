@@ -86,3 +86,16 @@ async def test_sync_rejects_unsupported_connector_override(client) -> None:
         f"/swarm/{request_id}/sync", json={"connector": "unknown_erp"}
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_sync_accepts_runtime_connector_override(client) -> None:
+    """The /sync connector override is now runtime-resolved via build_connector."""
+    r = await client.post("/swarm/requirements", json=_payload())
+    request_id = r.json()["request_id"]
+    resp = await client.post(
+        f"/swarm/{request_id}/sync", json={"connector": "supplier_api"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["execution_status"] is not None

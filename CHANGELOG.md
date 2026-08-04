@@ -4,6 +4,34 @@ Release history for the Autonomous Procurement Swarm. Tags follow a phase-driven
 `v0.x` scheme; `v0.2` was intentionally skipped — its concerns (Swarm Foundation)
 and (Procurement Agent Architecture) were delivered together in `v0.1`.
 
+## [Unreleased] — Runtime Configuration & Governance Hardening
+
+Config-driven connector selection so the *same* swarm targets a different external
+system per environment with no code changes, plus a system-level assertion that
+the contract pre-gate is a hard gate.
+
+Added:
+- `ConnectorConfig` + `build_connector` factory
+  (`swarm/integrations/factory.py`, re-exported from `swarm.integrations`): a
+  runtime config (`provider: mock | supplier_api | sap | oracle | coupa`,
+  `mode: sandbox | prod`, plus optional `endpoint`/`credentials`) selects the
+  adapter. `build_connector(config) -> BaseConnector` dispatches by provider (the
+  ERP adapters are constructed from the same config); `mode` drives
+  `environment`/`live` and `credentials` is operator-supplied configuration data
+  (never hardcoded). `build_connector_from_env()` / `get_connector_config_from_env()`
+  read `PROCUREMENT_CONNECTOR_PROVIDER` / `PROCUREMENT_CONNECTOR_MODE`, so
+  DEV→`MockConnector`, STAGING→`SupplierAPIConnector`, PROD→`CoupaConnector` is
+  now a deployment-time switch.
+- API wiring: `POST /swarm/requirements` and the `POST /swarm/{request_id}/execute`
+  / `sync` endpoints use the env-resolved default connector, and `/sync` now
+  accepts any supported `connector` override (resolved via `build_connector`)
+  instead of only `mock`; unknown providers return `400`.
+- Integration test `test_contract_rejection_short_circuits_to_rejected_governance`
+  in `tests/integration/test_governance_flow.py`: asserts the contract pre-gate is
+  a hard gate — `DecisionMade` → `ContractRejected` → `GovernanceDecision(REJECTED)`
+  with **no** `RiskAssessment`, `ExecutionAuthorization`, purchase order or execution
+  status, and an `ApprovalRejected` event is published.
+
 ## v0.8 — Enterprise Integration Layer (77ea476)
 
 This phase crosses the deterministic boundary: the swarm still owns source of

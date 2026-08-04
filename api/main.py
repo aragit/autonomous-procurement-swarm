@@ -35,8 +35,13 @@ from swarm.domain.events import (
     RECORD_OUTCOME_INTENT,
 )
 from swarm.domain.wiring import build_procurement_swarm
-from swarm.integrations.base import BaseConnector
-from swarm.integrations.mock import MockConnector
+from swarm.integrations import (
+    PROVIDERS,
+    BaseConnector,
+    ConnectorConfig,
+    build_connector,
+    build_connector_from_env,
+)
 from swarm.memory import default_store
 
 # Configure logging at import time
@@ -57,9 +62,18 @@ shared_vector_store: PgVectorMemoryStore | None = None
 swarm_states: dict[str, SwarmState] = {}
 MAX_SWARM_STATES = 50
 
-# Default deterministic base connector used by the execution endpoints so every
-# external interaction is audited via ExternalCallArtifact even without a live ERP.
-default_base_connector: BaseConnector = MockConnector()
+# Default base connector used by the execution endpoints. Resolved from the
+# runtime environment (PROCUREMENT_CONNECTOR_PROVIDER /
+# PROCUREMENT_CONNECTOR_MODE) so the same swarm targets a different external
+# system per environment without code changes — DEV defaults to the in-memory
+# MockConnector, STAGING to SupplierAPIConnector, PROD to CoupaConnector. When no
+# credentials are configured the adapter simulates deterministically, so every
+# external interaction stays audited via ExternalCallArtifact and replay-safe.
+def _default_base_connector() -> BaseConnector:
+    return build_connector_from_env()
+
+
+default_base_connector: BaseConnector = _default_base_connector()
 
 # Deterministic, in-memory supplier performance shared across requests (Phase 5).
 # No external database: history is append-only and reproducible from the
@@ -348,6 +362,7 @@ async def dispatch_swarm_requirement(
         request_id=request_id,
         goal=request.goal or f"Source {request.quantity} units of {request.material}",
         supplier_memory=supplier_memory,
+        base_connector=default_base_connector,
     )
     await swarm.start()
     correlation_id = f"{request_id}-CONV"
@@ -703,13 +718,21 @@ async def sync_swarm_external(
             status_code=404,
             detail=f"No purchase order for request_id {request_id}",
         )
-    connector: BaseConnector = default_base_connector
-    if request.connector and request.connector != "mock":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported connector override {request.connector!r}; "
-            "use the in-process default connector",
-        )
+    if request.connector:
+        try:
+            connector = build_connector(
+                ConnectorConfig(provider=request.connector, mode="sandbox")
+            )
+        except ValueError as err:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported connector override {request.connector!r}; "
+                    f"expected one of {list(PROVIDERS)}"
+                ),
+            ) from err
+    else:
+        connector = default_base_connector
     exec_agent = ExecutionTrackingAgent(base_connector=connector)
     execution = exec_agent.track(state)
     calls = state.find_artifacts(kind=EXTERNAL_CALL_ARTIFACT_NAME)
