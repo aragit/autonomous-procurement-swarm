@@ -26,6 +26,9 @@ def record_llm_consensus(
     correlation_id: str,
     consensus: dict[str, Any],
     round_number: int,
+    stability: float | None = None,
+    trust: float | None = None,
+    decision_reason: str | None = None,
     parent_ids: list[str] | None = None,
     by: str = "strategy_agent",
 ) -> Artifact:
@@ -33,7 +36,9 @@ def record_llm_consensus(
 
     The artifact is tagged ``{"llm_consensus": True}`` and stamped with
     ``round_number`` so the temporal evaluator can reconstruct the chronological
-    order of consensus rounds.
+    order of consensus rounds. Optional ``stability``, ``trust`` and
+    ``decision_reason`` fields enrich the record for metrics and drift
+    analysis (Steps 10-11).
     """
     data: dict[str, Any] = {
         "correlation_id": correlation_id,
@@ -45,6 +50,12 @@ def record_llm_consensus(
         "num_completions": consensus.get("num_completions", 0),
         "aggregated_adjustments": consensus.get("aggregated_adjustments", {}),
     }
+    if stability is not None:
+        data["stability"] = stability
+    if trust is not None:
+        data["trust"] = trust
+    if decision_reason is not None:
+        data["decision_reason"] = decision_reason
     artifact = Artifact(
         kind="llm_consensus",
         name=f"llm_consensus_{correlation_id}_{round_number}",

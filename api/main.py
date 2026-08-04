@@ -21,6 +21,8 @@ from core.memory.semantic import PgVectorMemoryStore
 from core.protocol.auction_orchestrator import AuctionOrchestrator
 from core.protocol.policy_engine import PolicyContext, PolicyEngine
 from swarm import SwarmState
+from swarm.api.strategy import app as llm_observability_app
+from swarm.api.strategy import set_state_provider
 from swarm.core.timeline import build_timeline
 from swarm.domain.agents import ApprovalAgent, ExecutionTrackingAgent, PurchaseOrderAgent
 from swarm.domain.artifacts import (
@@ -106,6 +108,23 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+
+# Mount v0.9 LLM observability sub-app at /llm-obs and wire its state
+# provider to look up remembered swarm states by correlation ID.
+app.mount("/llm-obs", llm_observability_app)
+
+def _lookup_swarm_state_by_correlation_id(cid: str) -> SwarmState | None:
+    """Resolve a remembered swarm state by correlation ID prefix."""
+    for state in swarm_states.values():
+        if state.request_id in cid or cid.startswith(state.request_id):
+            return state
+    return None
+
+set_state_provider(_lookup_swarm_state_by_correlation_id)
+
+# Mount the single-entry procurement endpoint
+from swarm.api.procurement import router as _procurement_router
+app.include_router(_procurement_router)
 
 
 class AuctionRequest(BaseModel):

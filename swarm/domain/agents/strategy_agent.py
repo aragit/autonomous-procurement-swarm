@@ -72,9 +72,11 @@ from swarm.domain.artifacts import (
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.strategy import Strategy, select_strategy
 from swarm.utils.llm_consensus import compute_llm_consensus
+from swarm.utils.llm_drift import detect_drift
 from swarm.utils.llm_explainer import build_llm_explanation
 from swarm.utils.llm_fallback import evaluate_llm_usage
 from swarm.utils.llm_memory import get_llm_consensus_history, record_llm_consensus
+from swarm.utils.llm_metrics import compute_llm_metrics
 from swarm.utils.llm_reader import get_all_llm_completions, get_latest_llm_completion
 from swarm.utils.llm_stability import TRUST_THRESHOLD, compute_temporal_stability
 from swarm.utils.llm_validation import validate_strategy_adjustments
@@ -111,6 +113,8 @@ class StrategyAgent(BaseAgent):
         self._explanation: dict[str, Any] = {}
         self._policy_applied: dict[str, float] = {}
         self._llm_decision: dict[str, Any] = {}
+        self._metrics: dict[str, Any] = {}
+        self._drift_detected: bool = False
         self._pending = False
         self._is_re_evaluation = False
         self._strategy_selected_event_published = False
@@ -182,44 +186,49 @@ class StrategyAgent(BaseAgent):
             )
             round_number = len(existing_history) + 1
 
+            # Compute stability from existing history (before recording current).
+            self._stability = compute_temporal_stability(existing_history)
+            confidence = self._consensus.get("confidence", 0.0)
+            self._trust_score = round(confidence * self._stability, 4)
+            self._history_depth = round_number
+
+            # Evaluate LLM usage through the deterministic fallback framework.
+            self._llm_decision = evaluate_llm_usage(
+                has_completions=True,
+                confidence=confidence,
+                stability=self._stability,
+                trust=self._trust_score,
+                threshold=TRUST_THRESHOLD,
+            )
+
             record_llm_consensus(
                 state,
                 correlation_id=self._correlation_id or "",
                 consensus=self._consensus,
                 round_number=round_number,
+                stability=self._stability,
+                trust=self._trust_score,
+                decision_reason=self._llm_decision.get("reason", "accepted"),
                 parent_ids=[c.id for c in state.find_artifacts(
                     kind="llm",
                     correlation_id=self._correlation_id,
                 )],
                 by=self.name,
             )
-
-            # Read full history (including the just-recorded consensus).
-            history = get_llm_consensus_history(
-                state,
-                correlation_id=self._correlation_id or "",
-            )
-            self._history_depth = len(history)
-
-            self._stability = compute_temporal_stability(history)
-            confidence = self._consensus.get("confidence", 0.0)
-            self._trust_score = round(confidence * self._stability, 4)
         else:
             self._history_depth = 0
             self._stability = 0.0
             self._trust_score = 0.0
+            self._llm_decision = evaluate_llm_usage(
+                has_completions=False,
+                confidence=self._consensus.get("confidence", 0.0),
+                stability=0.0,
+                trust=0.0,
+                threshold=TRUST_THRESHOLD,
+            )
 
-        # v0.9 Step 9: Evaluate LLM usage through the deterministic fallback
-        # framework. The first failing condition determines why LLM influence
-        # is withheld, guaranteeing safe degradation to canonical strategy.
-        self._llm_decision = evaluate_llm_usage(
-            has_completions=bool(completions),
-            confidence=self._consensus.get("confidence", 0.0),
-            stability=self._stability,
-            trust=self._trust_score,
-            threshold=TRUST_THRESHOLD,
-        )
-
+        # Step 9: The fallback decision was computed above alongside the
+        # consensus history recording. Here we act on it:
         if self._llm_decision["use_llm"]:
             aggregated = self._consensus.get("aggregated_adjustments", {})
             self._raw_adjustments = aggregated
@@ -261,6 +270,16 @@ class StrategyAgent(BaseAgent):
             threshold=TRUST_THRESHOLD,
             adjustments=self._validated_adjustments,
         )
+
+        # Step 10-11: Compute aggregated metrics and drift detection from
+        # the full consensus history (including the just-recorded round).
+        if self._history_depth > 0:
+            history = get_llm_consensus_history(
+                state,
+                correlation_id=self._correlation_id or "",
+            )
+            self._metrics = compute_llm_metrics(history)
+            self._drift_detected, _ = detect_drift(history)
 
         logger.info(
             "strategy_selected",
