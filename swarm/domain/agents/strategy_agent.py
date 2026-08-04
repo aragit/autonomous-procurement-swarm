@@ -53,6 +53,7 @@ from swarm.domain.artifacts import (
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.strategy import Strategy, select_strategy
 from swarm.utils.llm_consensus import compute_llm_consensus
+from swarm.utils.llm_explainer import build_llm_explanation
 from swarm.utils.llm_memory import get_llm_consensus_history, record_llm_consensus
 from swarm.utils.llm_reader import get_all_llm_completions, get_latest_llm_completion
 from swarm.utils.llm_stability import TRUST_THRESHOLD, compute_temporal_stability
@@ -86,6 +87,7 @@ class StrategyAgent(BaseAgent):
         self._stability: float = 0.0
         self._trust_score: float = 0.0
         self._history_depth: int = 0
+        self._explanation: dict[str, Any] = {}
         self._pending = False
         self._is_re_evaluation = False
         self._strategy_selected_event_published = False
@@ -183,7 +185,7 @@ class StrategyAgent(BaseAgent):
             self._stability = 0.0
             self._trust_score = 0.0
 
-        # Gate: only apply adjustments if trust >= threshold.
+         # Gate: only apply adjustments if trust >= threshold.
         # Trust = confidence × stability, so both dimensions must be high.
         # The aggregated adjustments from consensus go through validation again
         # (defense-in-depth) before being applied.
@@ -199,6 +201,16 @@ class StrategyAgent(BaseAgent):
 
         # Apply bounded adjustments to the strategy weights.
         self._adjusted_weights = self._apply_adjustments()
+
+        # Deterministic explainability: build an explanation dict that records
+        # the decision rationale without affecting any logic.
+        self._explanation = build_llm_explanation(
+            confidence=self._consensus.get("confidence", 0.0),
+            stability=self._stability,
+            trust=self._trust_score,
+            threshold=TRUST_THRESHOLD,
+            adjustments=self._validated_adjustments,
+        )
 
         logger.info(
             "strategy_selected",
@@ -272,6 +284,7 @@ class StrategyAgent(BaseAgent):
                 "trust_score": self._trust_score,
                 "history_depth": self._history_depth,
             },
+            "llm_explanation": self._explanation,
         }
 
         # On re-evaluation (QuotesCompleted), update the existing strategy
@@ -330,3 +343,4 @@ class StrategyAgent(BaseAgent):
         self._stability = 0.0
         self._trust_score = 0.0
         self._history_depth = 0
+        self._explanation = {}
