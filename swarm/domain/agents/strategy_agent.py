@@ -46,6 +46,14 @@ via :func:`swarm.utils.policy.apply_policy_constraints` to the audited
 ``adjusted_weights``, enforcing ``delivery >= 0.3`` and ``price <= 0.7``
 before recording ``policy_applied`` on the artifact. The canonical
 ``weights`` used by downstream agents are never affected.
+
+v0.9 Step 9: the agent evaluates LLM usage through
+:func:`swarm.utils.llm_fallback.evaluate_llm_usage`, a deterministic
+ordered evaluation that checks for missing data, low confidence, low
+stability, and low trust in sequence. The first failing condition
+determines the fallback ``reason``, guaranteeing safe degradation to the
+canonical strategy. The decision is recorded as ``llm_fallback`` on the
+artifact.
 """
 
 from typing import Any
@@ -65,6 +73,7 @@ from swarm.domain.events import ProcurementEventType
 from swarm.domain.strategy import Strategy, select_strategy
 from swarm.utils.llm_consensus import compute_llm_consensus
 from swarm.utils.llm_explainer import build_llm_explanation
+from swarm.utils.llm_fallback import evaluate_llm_usage
 from swarm.utils.llm_memory import get_llm_consensus_history, record_llm_consensus
 from swarm.utils.llm_reader import get_all_llm_completions, get_latest_llm_completion
 from swarm.utils.llm_stability import TRUST_THRESHOLD, compute_temporal_stability
@@ -101,6 +110,7 @@ class StrategyAgent(BaseAgent):
         self._history_depth: int = 0
         self._explanation: dict[str, Any] = {}
         self._policy_applied: dict[str, float] = {}
+        self._llm_decision: dict[str, Any] = {}
         self._pending = False
         self._is_re_evaluation = False
         self._strategy_selected_event_published = False
@@ -129,6 +139,7 @@ class StrategyAgent(BaseAgent):
             self._stability = 0.0
             self._trust_score = 0.0
             self._history_depth = 0
+            self._llm_decision = {}
 
     async def reason(self, state: SwarmState) -> None:
         if not self._pending:
@@ -157,7 +168,7 @@ class StrategyAgent(BaseAgent):
                 "used": True,
                 "risk_hints": risks[:3],
                 "tradeoff_hints": tradeoffs[:3],
-                "adjustments_applied": self._trust_score >= TRUST_THRESHOLD,
+                "adjustments_applied": self._llm_decision.get("use_llm", False),
             }
         else:
             self._llm_context = {"used": False, "adjustments_applied": False}
@@ -198,11 +209,18 @@ class StrategyAgent(BaseAgent):
             self._stability = 0.0
             self._trust_score = 0.0
 
-         # Gate: only apply adjustments if trust >= threshold.
-        # Trust = confidence × stability, so both dimensions must be high.
-        # The aggregated adjustments from consensus go through validation again
-        # (defense-in-depth) before being applied.
-        if self._trust_score >= TRUST_THRESHOLD:
+        # v0.9 Step 9: Evaluate LLM usage through the deterministic fallback
+        # framework. The first failing condition determines why LLM influence
+        # is withheld, guaranteeing safe degradation to canonical strategy.
+        self._llm_decision = evaluate_llm_usage(
+            has_completions=bool(completions),
+            confidence=self._consensus.get("confidence", 0.0),
+            stability=self._stability,
+            trust=self._trust_score,
+            threshold=TRUST_THRESHOLD,
+        )
+
+        if self._llm_decision["use_llm"]:
             aggregated = self._consensus.get("aggregated_adjustments", {})
             self._raw_adjustments = aggregated
             self._validated_adjustments = validate_strategy_adjustments(
@@ -212,7 +230,7 @@ class StrategyAgent(BaseAgent):
             self._raw_adjustments = {}
             self._validated_adjustments = {}
 
-         # Apply bounded adjustments to the strategy weights.
+        # Apply bounded adjustments to the strategy weights.
         self._adjusted_weights = self._apply_adjustments()
 
         # v0.9 Step 8: Apply deterministic policy constraints to the audited
@@ -321,6 +339,10 @@ class StrategyAgent(BaseAgent):
                 "applied": bool(self._policy_applied),
                 "final_weights": self._policy_applied,
             },
+            "llm_fallback": {
+                "used": self._llm_decision.get("use_llm", False),
+                "reason": self._llm_decision.get("reason", "no_llm_data"),
+            },
         }
 
         # On re-evaluation (QuotesCompleted), update the existing strategy
@@ -381,3 +403,4 @@ class StrategyAgent(BaseAgent):
         self._history_depth = 0
         self._explanation = {}
         self._policy_applied = {}
+        self._llm_decision = {}
