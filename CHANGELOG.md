@@ -4,7 +4,7 @@ Release history for the Autonomous Procurement Swarm. Tags follow a phase-driven
 `v0.x` scheme; `v0.2` was intentionally skipped — its concerns (Swarm Foundation)
 and (Procurement Agent Architecture) were delivered together in `v0.1`.
 
-## v0.8 — Enterprise Integration Layer (commit TBD)
+## v0.8 — Enterprise Integration Layer (77ea476)
 
 This phase crosses the deterministic boundary: the swarm still owns source of
 truth and approval/governance logic is unchanged, but outbound calls to external
