@@ -35,6 +35,17 @@ is only applied when ``trust >= TRUST_THRESHOLD`` (0.7). This prevents the syste
 from over-trusting an LLM that produces high-confidence but volatile suggestions,
 and avoids over-trusting early (single-data-point) consensus that has no
 temporal track record.
+
+v0.9 Step 7: the agent generates a deterministic explanation via
+:func:`swarm.utils.llm_explainer.build_llm_explanation` that records the
+accept/reject rationale as ``llm_explanation`` on the artifact — purely
+observational, no logic changes.
+
+v0.9 Step 8: the agent applies deterministic business policy constraints
+via :func:`swarm.utils.policy.apply_policy_constraints` to the audited
+``adjusted_weights``, enforcing ``delivery >= 0.3`` and ``price <= 0.7``
+before recording ``policy_applied`` on the artifact. The canonical
+``weights`` used by downstream agents are never affected.
 """
 
 from typing import Any
@@ -58,6 +69,7 @@ from swarm.utils.llm_memory import get_llm_consensus_history, record_llm_consens
 from swarm.utils.llm_reader import get_all_llm_completions, get_latest_llm_completion
 from swarm.utils.llm_stability import TRUST_THRESHOLD, compute_temporal_stability
 from swarm.utils.llm_validation import validate_strategy_adjustments
+from swarm.utils.policy import apply_policy_constraints
 
 logger = structlog.get_logger(__name__)
 
@@ -88,6 +100,7 @@ class StrategyAgent(BaseAgent):
         self._trust_score: float = 0.0
         self._history_depth: int = 0
         self._explanation: dict[str, Any] = {}
+        self._policy_applied: dict[str, float] = {}
         self._pending = False
         self._is_re_evaluation = False
         self._strategy_selected_event_published = False
@@ -199,8 +212,27 @@ class StrategyAgent(BaseAgent):
             self._raw_adjustments = {}
             self._validated_adjustments = {}
 
-        # Apply bounded adjustments to the strategy weights.
+         # Apply bounded adjustments to the strategy weights.
         self._adjusted_weights = self._apply_adjustments()
+
+        # v0.9 Step 8: Apply deterministic policy constraints to the audited
+        # adjusted weights — only when LLM influence was actually applied.
+        # This enforces hard business rules (delivery >= 0.3, price <= 0.7)
+        # on the LLM-influenced weights without touching the canonical strategy
+        # weights used by downstream agents.
+        if self._validated_adjustments and self._adjusted_weights:
+            self._policy_applied = apply_policy_constraints(
+                {
+                    "price": self._adjusted_weights["price_weight"],
+                    "delivery": self._adjusted_weights["score_weight"],
+                }
+            )
+            self._adjusted_weights["price_weight"] = self._policy_applied["price"]
+            self._adjusted_weights["score_weight"] = self._policy_applied["delivery"]
+            self._adjusted_weights["carbon_weight"] = round(
+                1.0 - self._policy_applied["price"] - self._policy_applied["delivery"],
+                4,
+            )
 
         # Deterministic explainability: build an explanation dict that records
         # the decision rationale without affecting any logic.
@@ -285,6 +317,10 @@ class StrategyAgent(BaseAgent):
                 "history_depth": self._history_depth,
             },
             "llm_explanation": self._explanation,
+            "policy_applied": {
+                "applied": bool(self._policy_applied),
+                "final_weights": self._policy_applied,
+            },
         }
 
         # On re-evaluation (QuotesCompleted), update the existing strategy
@@ -344,3 +380,4 @@ class StrategyAgent(BaseAgent):
         self._trust_score = 0.0
         self._history_depth = 0
         self._explanation = {}
+        self._policy_applied = {}
