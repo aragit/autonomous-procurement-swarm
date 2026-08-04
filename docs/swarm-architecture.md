@@ -78,11 +78,14 @@ flowchart TB
 | **Swarm** | `swarm/core/__init__.py` | Public facade: start / stop / send / replay / `get_execution_trace` / `expect_artifact` / `complete_artifact`. No business logic |
 | **Logging** | `swarm/core/logging.py` | `SWARM_LOG_LEVEL` control (`DEBUG` full event detail, `INFO` lifecycle only) |
 | **Wiring** | `swarm/domain/wiring.py` | `build_procurement_swarm(..., supplier_memory=..., governance_policy=..., supplier_connector=...)` — registers all agents + tracker with the Phase 7 subscriptions and strategy-weighted routing (Requirement→Strategy→Discovery→Evaluation→Negotiation→Decision→Risk→Governance→Approval→**Order→Execution**→Outcome) |
-| **Domain events** | `swarm/domain/events.py` | `ProcurementEventType` (`RequirementCreated`, `StrategySelected`, per-supplier `SupplierDiscovered` / `SupplierEvaluated` / `QuoteGenerated`, completion `EvaluationCompleted` / `QuotesCompleted`, `DecisionMade`, `RiskAssessmentCompleted`, `GovernanceDecisionMade`, `ApprovalGranted` / `ApprovalRequired` / `ApprovalRejected`, `PurchaseOrderCreated`, `ExecutionStatusUpdated`) and the `CreateRequirement` / `RecordProcurementOutcome` / `ApproveDecision` / `Execute` intents |
-| **Domain artifacts** | `swarm/domain/artifacts.py` | Requirement / strategy / supplier list / evaluation / quote / decision / decision-explanation / `risk_assessment` / `governance_decision` / `execution_authorization` / `purchase_order` / `execution_status` / procurement-outcome / supplier-performance artifacts with documented data contracts and `parent_ids` lineage |
-| **Pricing helpers** | `swarm/domain/pricing.py` | Deterministic floor price, lead time, carbon, bid bond (mirrors `core.agents.supplier` rules) |
-| **Domain agents** | `swarm/domain/agents/` | `RequirementAgent`, `StrategyAgent`, `SupplierDiscoveryAgent`, `EvaluationAgent`, `NegotiationAgent`, `DecisionAgent`, `RiskAssessmentAgent`, `GovernanceAgent`, `ApprovalAgent`, `PurchaseOrderAgent`, `ExecutionTrackingAgent`, `OutcomeAgent`, `SupplierIntelligenceAgent` — pure adapters over the existing `core/` logic |
+| **Domain events** | `swarm/domain/events.py` | `ProcurementEventType` (`RequirementCreated`, `StrategySelected`, per-supplier `SupplierDiscovered` / `SupplierEvaluated` / `QuoteGenerated`, completion `EvaluationCompleted` / `QuotesCompleted`, `DecisionMade`, `ContractValidated` / `ContractRejected`, `RiskAssessmentCompleted`, `GovernanceDecisionMade`, `ApprovalGranted` / `ApprovalRequired` / `ApprovalRejected`, `PurchaseOrderCreated`, `ExecutionStatusUpdated`, `ExternalCallRecorded`) and the `CreateRequirement` / `RecordProcurementOutcome` / `ApproveDecision` / `Execute` / `SyncExternal` intents |
+| **Domain artifacts** | `swarm/domain/artifacts.py` | Requirement / strategy / supplier list / evaluation / quote / decision / decision-explanation / `contract_validation` / `risk_assessment` / `governance_decision` / `execution_authorization` / `purchase_order` / `execution_status` / procurement-outcome / supplier-performance / `external_call` artifacts with documented data contracts and `parent_ids` lineage |
+| **Domain agents** | `swarm/domain/agents/` | `RequirementAgent`, `StrategyAgent`, `SupplierDiscoveryAgent`, `EvaluationAgent`, `NegotiationAgent`, `DecisionAgent`, `ContractValidationAgent`, `RiskAssessmentAgent`, `GovernanceAgent`, `ApprovalAgent`, `PurchaseOrderAgent`, `ExecutionTrackingAgent`, `OutcomeAgent`, `SupplierIntelligenceAgent` — pure adapters over the existing `core/` logic |
 | **Order model** | `swarm/domain/order.py` | Deterministic `PurchaseOrder` (`PurchaseStatus` lifecycle), `OrderLine` and the `SupplierConnector` protocol with a deterministic `MockSupplierConnector` |
+| **Contracts model** | `swarm/domain/contracts.py` | Deterministic `Contract` (supplier coverage, allowed items, pricing caps, expiry/compliance) with a pure `validate(...)` → `(valid, reason)` |
+| **Integration layer** | `swarm/integrations/` | `BaseConnector` port (`swarm/integrations/base.py` + `ExternalResponse`/`ExternalStatus`), deterministic `MockConnector`, stateless `SupplierAPIConnector`, and ERP adapters (`SAPConnector`, `OracleConnector`, `CoupaConnector` with `ConnectorConfig`) |
+| **Idempotency** | `swarm/utils/idempotency.py` | `IdempotencyGuard` — deterministic `(decision_id, action)` deduplication of external side effects |
+| **Pricing helpers** | `swarm/domain/pricing.py` | Deterministic floor price, lead time, carbon, bid bond (mirrors `core.agents.supplier` rules) |
 | **Risk model** | `swarm/domain/risk.py` | Deterministic `RiskAssessment` with financial / delivery / quality / carbon sub-scores, `RiskLevel`, and `compute_risk_scores` / `classify_risk` |
 | **Governance model** | `swarm/domain/governance.py` | `GovernancePolicy` (`standard_policy`, `strict_policy`) and deterministic `GovernanceDecision.from_risk` (`APPROVED` / `APPROVAL_REQUIRED` / `REJECTED`) |
 | **Supplier memory** | `swarm/memory/supplier.py` | Deterministic, in-memory `SupplierMemoryStore` + module-level `default_store`; `update_from_outcome` maintains running averages, `history_adjustment` maps reliability to a score delta |
@@ -353,6 +356,47 @@ Full lifecycle lineage: `... → ExecutionAuthorizationArtifact →
 PurchaseOrderArtifact → ExecutionStatusArtifact → ProcurementOutcomeArtifact →
 SupplierPerformanceArtifact`.
 
+## Phase 8: Enterprise Integration Layer (in progress)
+
+Phase 7 turned an authorized decision into a deterministic order and tracked it.
+Phase 8 is the boundary crossing into *real external systems* — **without**
+relinquishing the swarm's determinism, replay safety, idempotency or source-of-truth
+guarantees, and **without** altering governance/approval logic:
+
+- **Contract pre-gate** — `ContractValidationAgent` consumes `DecisionMade` and
+  applies the active `Contract` set (supplier coverage, allowed items, pricing
+  caps, active/expiry/compliance). A valid decision publishes
+  `ContractValidated`; an invalid/expired/missing-required contract publishes
+  `ContractRejected` which short-circuits straight to a `REJECTED`
+  `GovernanceDecision` (risk is skipped entirely). With no contract on file and
+  `require_contract=False` (the default) the decision is treated as valid, so the
+  gate is opt-in. The post-decision chain is now **Decision → Contract → Risk →
+  Governance**; `RiskAssessmentAgent` triggers on `ContractValidated`.
+- **BaseConnector port** — `swarm/integrations/base.py` defines the deterministic
+  adapter interface (`submit_order -> ExternalResponse`,
+  `get_order_status -> ExternalStatus`, `validate_supplier -> bool`). Adapters are
+  *translators only*: they map `PurchaseOrder` to an external schema and back to the
+  normalized response; they hold no swarm state and never mutate the artifact graph.
+  `MockConnector`, `SupplierAPIConnector` and the `SAPConnector` / `OracleConnector`
+  / `CoupaConnector` adapters all implement it.
+- **Audited side effects** — every outbound call produces an
+  `ExternalCallArtifact` (kind `external_call`) carrying `{system, action,
+  request_payload, response_payload, status, idempotency_key, timestamp}` and
+  lineage to the originating decision.
+- **Idempotency** — `swarm/utils/idempotency.py` (`IdempotencyGuard`) deduplicates
+  every operation by a deterministic `(decision_id, action)` key, so re-running an
+  order submission or a reconciliation pass never duplicates an external side
+  effect.
+- **Replay safety** — the runtime skips `act` for replayed events, so connectors are
+  never re-invoked on replay; the guard is a second defence for the API-driven
+  `/execute` and `/sync` path that calls agents directly.
+
+New API: `GET /swarm/external/{request_id}` (external-call audit trail) and
+`POST /swarm/{request_id}/sync` (idempotent external reconciliation); `POST
+/swarm/{request_id}/execute` now routes through the base connector and reports its
+external calls. `build_procurement_swarm` gains `base_connector`, `contracts` and
+`require_contract` parameters.
+
 ## Phase 5: deterministic supplier intelligence and outcome feedback
 
 Phase 5 makes the swarm learn from the outcome **deterministically** — closing the loop from
@@ -423,8 +467,8 @@ What is deliberately left for later:
   which stay deterministic.
 
 The next architectural phase is **v0.8 — Enterprise Integration Layer** (enterprise
-connectors, ERP/supplier APIs, contracts), and only after that **v0.9 —
-Cognitive Procurement Agents** (LLM-assisted negotiation and contract reasoning).
+connectors, ERP/supplier APIs, contracts, audited + idempotent external side
+effects), now in progress; only after that **v0.9 — Cognitive Procurement Agents** (LLM-assisted negotiation and contract reasoning).
 The architecture is now mature enough that adding LLMs later will make it stronger
 instead of making it fragile.
 

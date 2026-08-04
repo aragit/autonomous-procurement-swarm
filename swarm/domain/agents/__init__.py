@@ -6,6 +6,7 @@ never holding a direct reference to another agent.
 """
 
 from swarm.domain.agents.approval_agent import ApprovalAgent
+from swarm.domain.agents.contract_validation_agent import ContractValidationAgent
 from swarm.domain.agents.decision_agent import DecisionAgent
 from swarm.domain.agents.evaluation_agent import EvaluationAgent
 from swarm.domain.agents.execution_agent import ExecutionTrackingAgent
@@ -21,6 +22,7 @@ from swarm.domain.agents.supplier_intelligence_agent import SupplierIntelligence
 
 __all__ = [
     "ApprovalAgent",
+    "ContractValidationAgent",
     "DecisionAgent",
     "EvaluationAgent",
     "ExecutionTrackingAgent",

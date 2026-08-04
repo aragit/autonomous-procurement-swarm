@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 
 import structlog
 
@@ -35,13 +35,36 @@ from swarm.domain.artifacts import (
 from swarm.domain.events import EXECUTE_INTENT, ProcurementEventType
 from swarm.domain.order import (
     PurchaseOrder,
+    PurchaseStatus,
     SupplierConnector,
     default_connector,
     order_id_for,
     order_to_dict,
 )
+from swarm.integrations.base import (
+    BaseConnector,
+    ExternalResponse,
+    record_external_call,
+)
+from swarm.utils.idempotency import IdempotencyGuard
 
 logger = structlog.get_logger(__name__)
+
+
+def _connector_system(connector: object) -> str:
+    system = getattr(connector, "system", None)
+    if isinstance(system, str):
+        return system
+    return type(connector).__name__.lower()
+
+
+def _external_to_status(response: ExternalResponse) -> PurchaseStatus:
+    """Translate an external submission status onto the canonical PurchaseStatus."""
+    status_str = str(response.status)
+    for member in PurchaseStatus:
+        if member.value == status_str:
+            return member
+    return PurchaseStatus.SUBMITTED
 
 
 class PurchaseOrderAgent(BaseAgent):
@@ -60,9 +83,12 @@ class PurchaseOrderAgent(BaseAgent):
         self,
         *,
         connector: SupplierConnector | None = None,
+        base_connector: BaseConnector | None = None,
     ) -> None:
         super().__init__()
         self._connector = connector if connector is not None else default_connector
+        self._base_connector = base_connector
+        self._guard = IdempotencyGuard()
         self._correlation_id: str | None = None
         self._pending = False
         self._authorization_artifact: str = EXECUTION_AUTHORIZATION_ARTIFACT_NAME
@@ -158,12 +184,14 @@ class PurchaseOrderAgent(BaseAgent):
             requirement_artifact=requirement,
             quote_artifact=quote,
         )
-        status = self._connector.submit_order(order)
+        status, reference_id, _ = self._submit_order(state, order, str(decision.id))
         order = replace(
             order, status=status, submitted_at=datetime.now(UTC).isoformat()
         )
         data = order_to_dict(order)
         data["purchase_order_id"] = data["order_id"]
+        if reference_id:
+            data["reference_id"] = reference_id
         artifact = PurchaseOrderArtifact(
             data=data,
             parent_ids=[authorization.id],
@@ -177,3 +205,52 @@ class PurchaseOrderAgent(BaseAgent):
         )
         state.put_artifact(artifact)
         return artifact
+
+    def _submit_order(
+        self, state: SwarmState, order: PurchaseOrder, decision_id: str
+    ) -> tuple[PurchaseStatus, str, dict[str, Any]]:
+        """Submit the order via the configured connector, emitting an audit record.
+
+        Uses the :class:`BaseConnector` path when a ``base_connector`` is
+        configured: the call is deduplicated by the :class:`IdempotencyGuard`,
+        emits an :class:`ExternalCallArtifact`, and returns a canonical
+        :class:`PurchaseStatus`. Otherwise it falls back to the legacy
+        :class:`SupplierConnector` path for backward compatibility.
+        """
+        if self._base_connector is not None:
+            system = _connector_system(self._base_connector)
+            if self._guard.check(decision_id, "submit_order"):
+                existing = state.get_artifact(PURCHASE_ORDER_ARTIFACT_NAME)
+                if existing is not None:
+                    current = PurchaseStatus(
+                        str(existing.data.get("status", order.status.value))
+                    )
+                    return (
+                        current,
+                        str(existing.data.get("reference_id", "")),
+                        {},
+                    )
+            response = self._base_connector.submit_order(order)
+            self._guard.mark(decision_id, "submit_order")
+            record_external_call(
+                state,
+                system=system,
+                action="submit_order",
+                request_payload={
+                    "order_id": order.order_id,
+                    "supplier_id": order.supplier_id,
+                },
+                response_payload=(
+                    response.__dict__ if isinstance(response, ExternalResponse) else {}
+                ),
+                status="success" if response.success else "error",
+                order_id=order.order_id,
+                decision_id=decision_id,
+                idempotency_key=f"{decision_id}:submit_order",
+                correlation_id=self._correlation_id,
+                created_by=self.name,
+            )
+            submitted = _external_to_status(response)
+            return submitted, response.reference_id, {}
+        status = self._connector.submit_order(order)
+        return status, "", {}

@@ -19,6 +19,7 @@ CREATE_REQUIREMENT_INTENT = "CreateRequirement"
 RECORD_OUTCOME_INTENT = "RecordProcurementOutcome"
 APPROVE_INTENT = "ApproveDecision"
 EXECUTE_INTENT = "Execute"
+SYNC_INTENT = "SyncExternal"
 
 
 class ProcurementEventType(StrEnum):
@@ -32,9 +33,12 @@ class ProcurementEventType(StrEnum):
     EVALUATION_COMPLETED = "EvaluationCompleted"
     QUOTES_COMPLETED = "QuotesCompleted"
     DECISION_MADE = "DecisionMade"
+    CONTRACT_VALIDATED = "ContractValidated"
+    CONTRACT_REJECTED = "ContractRejected"
+    RISK_ASSESSMENT_COMPLETED = "RiskAssessmentCompleted"
+    EXTERNAL_CALL_RECORDED = "ExternalCallRecorded"
     OUTCOME_RECORDED = "OutcomeRecorded"
     SUPPLIER_PERFORMANCE_UPDATED = "SupplierPerformanceUpdated"
-    RISK_ASSESSMENT_COMPLETED = "RiskAssessmentCompleted"
     GOVERNANCE_DECISION_MADE = "GovernanceDecisionMade"
     APPROVAL_GRANTED = "ApprovalGranted"
     APPROVAL_REQUIRED = "ApprovalRequired"

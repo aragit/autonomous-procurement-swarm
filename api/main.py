@@ -25,6 +25,7 @@ from swarm.domain.agents import ApprovalAgent, ExecutionTrackingAgent, PurchaseO
 from swarm.domain.artifacts import (
     EXECUTION_AUTHORIZATION_ARTIFACT_NAME,
     EXECUTION_STATUS_ARTIFACT_NAME,
+    EXTERNAL_CALL_ARTIFACT_NAME,
     GOVERNANCE_DECISION_ARTIFACT_NAME,
     PURCHASE_ORDER_ARTIFACT_NAME,
     RISK_ASSESSMENT_ARTIFACT_NAME,
@@ -34,6 +35,8 @@ from swarm.domain.events import (
     RECORD_OUTCOME_INTENT,
 )
 from swarm.domain.wiring import build_procurement_swarm
+from swarm.integrations.base import BaseConnector
+from swarm.integrations.mock import MockConnector
 from swarm.memory import default_store
 
 # Configure logging at import time
@@ -53,6 +56,10 @@ shared_vector_store: PgVectorMemoryStore | None = None
 # Read-only swarm trace store: most recent wired-swarm executions by request_id.
 swarm_states: dict[str, SwarmState] = {}
 MAX_SWARM_STATES = 50
+
+# Default deterministic base connector used by the execution endpoints so every
+# external interaction is audited via ExternalCallArtifact even without a live ERP.
+default_base_connector: BaseConnector = MockConnector()
 
 # Deterministic, in-memory supplier performance shared across requests (Phase 5).
 # No external database: history is append-only and reproducible from the
@@ -602,19 +609,23 @@ async def execute_swarm_decision(
             detail=f"Execution blocked: authorization is {status!r}",
         )
 
-    order_agent = PurchaseOrderAgent()
+    order_agent = PurchaseOrderAgent(base_connector=default_base_connector)
     order = order_agent.create_order(state)
     if order is None:
         raise HTTPException(
             status_code=409,
             detail=f"No purchase order created for request_id {request_id}",
         )
-    exec_agent = ExecutionTrackingAgent()
+    exec_agent = ExecutionTrackingAgent(base_connector=default_base_connector)
     execution = exec_agent.track(state)
     return {
         "request_id": request_id,
         "purchase_order": order.data,
         "execution_status": execution.data if execution else None,
+        "external_calls": [
+            a.data
+            for a in state.find_artifacts(kind=EXTERNAL_CALL_ARTIFACT_NAME)
+        ],
     }
 
 
@@ -642,6 +653,72 @@ async def get_swarm_execution(request_id: str) -> dict[str, Any]:
             detail=f"No execution status for request_id {request_id}",
         )
     return {"request_id": request_id, "execution_status": status.data}
+
+
+@app.get("/swarm/external/{request_id}")
+async def get_swarm_external_calls(request_id: str) -> dict[str, Any]:
+    """Audit trail of outbound external-system calls for a swarm run.
+
+    Each call is a recorded :class:`ExternalCallArtifact` ({system, action,
+    request_payload, response_payload, status, idempotency_key, timestamp}).
+    Returns ``404`` when no external interactions have been recorded.
+    """
+    state = _swarm_state(request_id)
+    calls = state.find_artifacts(kind=EXTERNAL_CALL_ARTIFACT_NAME)
+    if not calls:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No external calls recorded for request_id {request_id}",
+        )
+    return {
+        "request_id": request_id,
+        "external_calls": [artifact.data for artifact in calls],
+    }
+
+
+class SyncRequest(BaseModel):
+    """Optional overrides for forcing an external reconciliation pass."""
+
+    connector: str | None = None
+    force: bool = False
+
+
+@app.post("/swarm/{request_id}/sync")
+async def sync_swarm_external(
+    request_id: str, request: SyncRequest
+) -> dict[str, Any]:
+    """Trigger an external-system reconciliation for a swarm run.
+
+    Re-runs the :class:`ExecutionTrackingAgent` against the remembered
+    :class:`PurchaseOrderArtifact` using the configured base connector so the
+    :class:`ExecutionStatusArtifact` reflects the latest external reality. The
+    step is idempotent: the idempotency guard ensures the external ``status``
+    call is not duplicated, and a present execution status is returned as-is
+    when no re-fetch is requested.
+    """
+    state = _swarm_state(request_id)
+    order = state.get_artifact(PURCHASE_ORDER_ARTIFACT_NAME)
+    if order is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No purchase order for request_id {request_id}",
+        )
+    connector: BaseConnector = default_base_connector
+    if request.connector and request.connector != "mock":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported connector override {request.connector!r}; "
+            "use the in-process default connector",
+        )
+    exec_agent = ExecutionTrackingAgent(base_connector=connector)
+    execution = exec_agent.track(state)
+    calls = state.find_artifacts(kind=EXTERNAL_CALL_ARTIFACT_NAME)
+    return {
+        "request_id": request_id,
+        "purchase_order": order.data,
+        "execution_status": execution.data if execution else None,
+        "external_calls": [artifact.data for artifact in calls],
+    }
 
 
 def _create_suppliers(material: str, spot_price: float, count: int = 5) -> list[SupplierAgent]:

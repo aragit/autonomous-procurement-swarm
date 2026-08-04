@@ -71,7 +71,7 @@ class RiskAssessmentAgent(BaseAgent):
     async def perceive(self, event: Event) -> None:
         if event.replayed:
             return
-        if event.type == ProcurementEventType.DECISION_MADE:
+        if event.type == ProcurementEventType.CONTRACT_VALIDATED:
             self._pending = True
             self._correlation_id = event.correlation_id
             self._decision_artifact = str(event.payload.get("artifact") or DECISION_ARTIFACT_NAME)

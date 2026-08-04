@@ -4,6 +4,60 @@ Release history for the Autonomous Procurement Swarm. Tags follow a phase-driven
 `v0.x` scheme; `v0.2` was intentionally skipped — its concerns (Swarm Foundation)
 and (Procurement Agent Architecture) were delivered together in `v0.1`.
 
+## v0.8 — Enterprise Integration Layer (commit TBD)
+
+This phase crosses the deterministic boundary: the swarm still owns source of
+truth and approval/governance logic is unchanged, but outbound calls to external
+systems are now audited, idempotent, and replay-safe.
+
+Added:
+- `BaseConnector` port (`swarm/integrations/base.py`): a pure, deterministic
+  interface (`submit_order -> ExternalResponse`, `get_order_status ->
+  ExternalStatus`, `validate_supplier -> bool`) plus `ExternalResponse` /
+  `ExternalStatus` normalized dataclasses. Every call returns a deterministic
+  shape and simulates a response when no live credentials are configured.
+- `MockConnector` (`swarm/integrations/mock.py`): the canonical in-memory adapter
+  implementing `BaseConnector` (deterministic lifecycle SUBMITTED -> CONFIRMED ->
+  SHIPPED -> DELIVERED); supersedes the role of `MockSupplierConnector` for the
+  new integration layer.
+- `SupplierAPIConnector` (`swarm/integrations/supplier_api.py`): stateless
+  supplier-order adapter (simulated HTTP surface, deterministic per order id,
+  `validate_supplier` rejects an `invalid_` prefix).
+- ERP adapters (`swarm/integrations/erp/`): `SAPConnector`, `OracleConnector`,
+  `CoupaConnector` with a `ConnectorConfig` (provider/endpoint/credentials/
+  environment); deterministic simulation when unconfigured, live-API shape when
+  configured.
+- `ExternalCallArtifact` (kind `external_call`) on the artifact graph — every
+  external invocation records {system, action, request_payload, response_payload,
+  status, idempotency_key, timestamp} with lineage to the originating decision.
+- Idempotency layer (`swarm/utils/idempotency.py`): `IdempotencyGuard` keyed by
+  deterministic `(decision_id, action)` so the same operation never performs a
+  duplicate external side effect.
+- `ContractValidationAgent` + `Contract` model: a contract pre-gate between
+  decision and risk. `DecisionMade -> ContractValidated` (valid or no-contract)
+  proceeds to risk; `ContractRejected` (invalid/expired/requires-contract)
+  short-circuits straight to a `REJECTED` governance decision, skipping risk.
+- API: `GET /swarm/external/{request_id}` (external-call audit trail) and
+  `POST /swarm/{request_id}/sync` (idempotent external reconciliation);
+  `POST /swarm/{request_id}/execute` now uses the base connector and reports
+  its external calls.
+
+Changed:
+- `RiskAssessmentAgent` now triggers on `ContractValidated` (was `DecisionMade`),
+  reordering the post-decision chain to
+  `Decision -> Contract Validation -> Risk -> Governance`.
+- `GovernanceAgent` additionally handles `ContractRejected`, producing a `REJECTED`
+  decision directly (the pure `GovernanceDecision.from_risk` / approval logic is
+  untouched).
+- `PurchaseOrderAgent` / `ExecutionTrackingAgent` accept an optional
+  `base_connector: BaseConnector`; when set they use it (deduplicated via the
+  idempotency guard, audited via `ExternalCallArtifact`); otherwise the legacy
+  `SupplierConnector` path is unchanged. `build_procurement_swarm` gained
+  `base_connector` and `contracts`/`require_contract` parameters.
+- Replay safety: replayed events never reach `act`, so connectors are never
+  re-invoked on replay; the idempotency guard is a second defence for the
+  API-driven execution path.
+
 ## v0.7 — Execution & Procurement Operations (a7ea64f)
 
 Added:

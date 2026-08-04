@@ -29,6 +29,7 @@ from swarm.domain.governance import (
     STANDARD_POLICY,
     GovernanceDecision,
     GovernancePolicy,
+    GovernanceStatus,
 )
 from swarm.domain.risk import RiskAssessment
 
@@ -54,6 +55,10 @@ class GovernanceAgent(BaseAgent):
         self._risk_artifact: str = "risk_assessment"
         self._risk_artifact_id: str = ""
         self._pending = False
+        self._contract_rejected = False
+        self._reject_reason: str | None = None
+        self._reject_supplier_id: str = ""
+        self._reject_decision_id: str = ""
         self._decision: GovernanceDecision | None = None
 
     async def perceive(self, event: Event) -> None:
@@ -63,10 +68,35 @@ class GovernanceAgent(BaseAgent):
             self._pending = True
             self._correlation_id = event.correlation_id
             self._risk_artifact = str(event.payload.get("artifact") or "risk_assessment")
+            self._contract_rejected = False
+            self._decision = None
+        elif event.type == ProcurementEventType.CONTRACT_REJECTED:
+            self._pending = True
+            self._correlation_id = event.correlation_id
+            self._risk_artifact = str(event.payload.get("artifact") or "decision")
+            self._contract_rejected = True
+            self._reject_reason = str(event.payload.get("reason") or "contract rejected")
+            self._reject_supplier_id = str(event.payload.get("supplier_id") or "")
+            self._reject_decision_id = str(event.payload.get("decision_id") or "")
             self._decision = None
 
     async def reason(self, state: SwarmState) -> None:
         if not self._pending:
+            return
+        if self._contract_rejected:
+            self._decision = GovernanceDecision(
+                decision_id=self._reject_decision_id,
+                supplier_id=self._reject_supplier_id,
+                risk_id=self._reject_decision_id,
+                status=GovernanceStatus.REJECTED,
+                policy_used=self._policy.name,
+                purchase_amount=0.0,
+                overall_risk_score=0.0,
+                risk_level="UNKNOWN",
+                reasons=[f"Contract validation failed: {self._reject_reason}"],
+                required_approver=None,
+            )
+            self._risk_artifact_id = self._reject_decision_id or self._risk_artifact
             return
         risk_artifact = state.get_artifact(self._risk_artifact)
         if risk_artifact is None:
@@ -126,4 +156,5 @@ class GovernanceAgent(BaseAgent):
             )
         )
         self._pending = False
+        self._contract_rejected = False
         self._decision = None

@@ -13,15 +13,18 @@ per-supplier multi-agent flow with a governance + execution tail:
   ``supplier.evaluate`` capability, so specialized evaluators can compete)
 - ``NegotiationAgent``  — quotes each evaluated supplier
 - ``DecisionAgent``     — decides only after ``QuotesCompleted`` fires
-- ``RiskAssessmentAgent`` — assesses the selected decision (subscribes to ``DecisionMade``)
+- ``RiskAssessmentAgent`` — assesses the selected decision (subscribes to ``ContractValidated``)
 - ``GovernanceAgent``   — applies governance policy to the risk assessment
+  (also short-circuits a ``ContractRejected`` decision to REJECTED)
 - ``ApprovalAgent``     — closes the gate into an execution authorization
-- ``PurchaseOrderAgent`` — creates a purchase order once a decision is ``authorized``
-- ``ExecutionTrackingAgent`` — tracks the order's lifecycle to delivery
-- ``OutcomeAgent``      — records the realized procurement outcome
-- ``SupplierIntelligenceAgent`` — folds the outcome into deterministic supplier history
-- ``CompletionTracker`` — closes a phase once every expected artifact exists and
-  publishes ``EvaluationCompleted`` / ``QuotesCompleted``
+ - ``PurchaseOrderAgent`` — creates a purchase order once a decision is ``authorized``
+ - ``ExecutionTrackingAgent`` — tracks the order's lifecycle to delivery
+ - ``OutcomeAgent``      — records the realized procurement outcome
+ - ``SupplierIntelligenceAgent`` — folds the outcome into deterministic supplier history
+ - ``ContractValidationAgent`` — applies supplier contracts to a decision
+   (subscribes to ``DecisionMade``; emits ``ContractValidated``/``ContractRejected``)
+ - ``CompletionTracker`` — closes a phase once every expected artifact exists and
+   publishes ``EvaluationCompleted`` / ``QuotesCompleted``
 
 The only public entry point is the returned :class:`Swarm` facade; callers drive
 it with ``send_message(CREATE_REQUIREMENT_INTENT, payload)`` and read the result
@@ -30,6 +33,12 @@ shares deterministic supplier history across the evaluation and risk stages;
 ``governance_policy`` selects the policy applied to each decision;
 ``supplier_connector`` supplies the deterministic ERP/supplier adapter used to
 submit and track purchase orders.
+
+``contracts`` is an optional mapping of ``{supplier_id: Contract}`` applied to
+every decision (contract compliance gate between decision and risk). When
+``require_contract`` is False (default) a supplier without a contract is
+treated as valid; when True a missing contract short-circuits the decision to
+REJECTED.
 """
 
 from collections.abc import Callable
@@ -40,6 +49,7 @@ from swarm.core.completion import CompletionTracker
 from swarm.core.event import ANY_EVENT, Event, SwarmEventType
 from swarm.domain.agents import (
     ApprovalAgent,
+    ContractValidationAgent,
     DecisionAgent,
     EvaluationAgent,
     ExecutionTrackingAgent,
@@ -53,9 +63,12 @@ from swarm.domain.agents import (
     SupplierDiscoveryAgent,
     SupplierIntelligenceAgent,
 )
+from swarm.domain.contracts import Contract
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.governance import STANDARD_POLICY, GovernancePolicy
 from swarm.domain.order import SupplierConnector, default_connector
+from swarm.integrations.base import BaseConnector
+from swarm.integrations.mock import MockConnector
 from swarm.memory import SupplierMemoryStore
 
 COMPLETION_EVENTS = {
@@ -87,6 +100,9 @@ def build_procurement_swarm(
     supplier_memory: SupplierMemoryStore | None = None,
     governance_policy: GovernancePolicy | None = None,
     supplier_connector: SupplierConnector | None = None,
+    base_connector: BaseConnector | None = None,
+    contracts: dict[str, Contract] | None = None,
+    require_contract: bool = False,
 ) -> Swarm:
     """Create a wired procurement swarm with completion tracking enabled."""
     swarm = Swarm(request_id=request_id, goal=goal)
@@ -104,6 +120,10 @@ def build_procurement_swarm(
     swarm.governance_policy = policy  # type: ignore[attr-defined]
     connector = supplier_connector if supplier_connector is not None else default_connector
     swarm.supplier_connector = connector  # type: ignore[attr-defined]
+    base = base_connector if base_connector is not None else MockConnector()
+    swarm.base_connector = base  # type: ignore[attr-defined]
+    swarm.contracts = dict(contracts or {})  # type: ignore[attr-defined]
+    swarm.require_contract = require_contract  # type: ignore[attr-defined]
 
     swarm.register(RequirementAgent(), event_types=[SwarmEventType.MESSAGE])
     swarm.register(
@@ -130,23 +150,33 @@ def build_procurement_swarm(
         event_types=[ProcurementEventType.QUOTES_COMPLETED],
     )
     swarm.register(
-        RiskAssessmentAgent(memory=memory, policy=policy),
+        ContractValidationAgent(
+            contracts=dict(contracts or {}),
+            require_contract=require_contract,
+        ),
         event_types=[ProcurementEventType.DECISION_MADE],
     )
     swarm.register(
+        RiskAssessmentAgent(memory=memory, policy=policy),
+        event_types=[ProcurementEventType.CONTRACT_VALIDATED],
+    )
+    swarm.register(
         GovernanceAgent(policy=policy),
-        event_types=[ProcurementEventType.RISK_ASSESSMENT_COMPLETED],
+        event_types=[
+            ProcurementEventType.RISK_ASSESSMENT_COMPLETED,
+            ProcurementEventType.CONTRACT_REJECTED,
+        ],
     )
     swarm.register(
         ApprovalAgent(),
         event_types=[ProcurementEventType.GOVERNANCE_DECISION_MADE, SwarmEventType.MESSAGE],
     )
     swarm.register(
-        PurchaseOrderAgent(connector=connector),
+        PurchaseOrderAgent(connector=connector, base_connector=base),
         event_types=[ProcurementEventType.APPROVAL_GRANTED, SwarmEventType.MESSAGE],
     )
     swarm.register(
-        ExecutionTrackingAgent(connector=connector),
+        ExecutionTrackingAgent(connector=connector, base_connector=base),
         event_types=[ProcurementEventType.PURCHASE_ORDER_CREATED],
     )
     swarm.register(

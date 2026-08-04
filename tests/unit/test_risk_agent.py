@@ -110,11 +110,18 @@ def seed_evaluation(state: SwarmState, supplier: str = "MinerCorp_A") -> None:
     )
 
 
-def decision_made_event() -> Event:
+def contract_validated_event() -> Event:
     return Event(
-        type="DecisionMade",
-        source="decision_agent",
-        payload={"artifact": "decision", "selected_supplier": "MinerCorp_A"},
+        type="ContractValidated",
+        source="contract_validation_agent",
+        payload={
+            "artifact": "decision",
+            "selected_supplier": "MinerCorp_A",
+            "decision_id": DECISION_ID,
+            "supplier_id": "MinerCorp_A",
+            "contract_id": None,
+            "valid": True,
+        },
         correlation_id="REQ-RSK-01",
     )
 
@@ -127,7 +134,7 @@ async def test_risk_agent_creates_low_risk_assessment() -> None:
     seed_requirement(state)
     seed_quote(state)
     seed_evaluation(state)
-    bus = await drive(agent, state, decision_made_event())
+    bus = await drive(agent, state, contract_validated_event())
 
     risks = state.find_artifacts(kind="risk_assessment")
     assert len(risks) == 1
@@ -148,7 +155,7 @@ async def test_risk_agent_degrades_gracefully_without_quote_or_requirement() -> 
     agent = RiskAssessmentAgent()
     state = SwarmState()
     seed_decision(state)
-    await drive(agent, state, decision_made_event())
+    await drive(agent, state, contract_validated_event())
 
     risk = state.get_artifact("risk_assessment")
     assert risk is not None
@@ -166,6 +173,8 @@ async def test_risk_agent_ignores_replayed_events() -> None:
     seed_requirement(state)
     seed_quote(state)
     agent.state = state
-    await agent.step(decision_made_event().model_copy(update={"replayed": True}))
+    await agent.step(
+        contract_validated_event().model_copy(update={"replayed": True})
+    )
 
     assert state.find_artifacts(kind="risk_assessment") == []

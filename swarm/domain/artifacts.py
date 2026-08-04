@@ -22,6 +22,8 @@ GOVERNANCE_DECISION_ARTIFACT_NAME = "governance_decision"
 EXECUTION_AUTHORIZATION_ARTIFACT_NAME = "execution_authorization"
 PURCHASE_ORDER_ARTIFACT_NAME = "purchase_order"
 EXECUTION_STATUS_ARTIFACT_NAME = "execution_status"
+CONTRACT_VALIDATION_ARTIFACT_NAME = "contract_validation"
+EXTERNAL_CALL_ARTIFACT_NAME = "external_call"
 
 
 def evaluation_artifact_name(supplier_id: str) -> str:
@@ -409,3 +411,48 @@ class ExecutionStatusArtifact(Artifact):
 
     kind: Literal["execution_status"] = "execution_status"
     name: str = EXECUTION_STATUS_ARTIFACT_NAME
+
+
+class ExternalCallArtifact(Artifact):
+    """An outbound call made to an external system (Phase 8 integration layer).
+
+    Produced by agents that talk to ERP/supplier/contract systems so every
+    external interaction is auditable and replay-safe. ``data`` contract::
+
+        {
+            "system": str,                       # e.g. "coupa", "sap", "supplier_api"
+            "action": str,                       # callable name, e.g. "submit_order"
+            "order_id": str | None,              # linked purchase order, if any
+            "decision_id": str | None,
+            "request_payload": dict | None,      # serialized request (no secrets)
+            "response_payload": dict | None,     # serialized response (no secrets)
+            "status": str,                       # success | error | pending
+            "timestamp": str,                    # ISO-8601 UTC
+        }
+    """
+
+    kind: Literal["external_call"] = "external_call"
+    name: str = EXTERNAL_CALL_ARTIFACT_NAME
+
+
+class ContractValidationArtifact(Artifact):
+    """The result of validating a decision against supplier contract(s).
+
+    Produced by :class:`swarm.domain.agents.contract_validation_agent.
+    ContractValidationAgent` and consumed by :class:`RiskAssessmentAgent`. Its
+    ``parent_ids`` reference the originating :class:`DecisionArtifact` (by id).
+
+    ``data`` contract::
+
+        {
+            "decision_id": str,
+            "supplier_id": str,
+            "contract_id": str | None,          # which contract was applied
+            "valid": bool,                      # True → proceed to risk; False → reject
+            "reason": str | None,               # human-readable outcome
+            "validated_at": str,                # ISO-8601 UTC
+        }
+    """
+
+    kind: Literal["contract_validation"] = "contract_validation"
+    name: str = CONTRACT_VALIDATION_ARTIFACT_NAME

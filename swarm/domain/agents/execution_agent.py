@@ -33,8 +33,21 @@ from swarm.domain.order import (
     SupplierConnector,
     default_connector,
 )
+from swarm.integrations.base import (
+    BaseConnector,
+    ExternalStatus,
+    record_external_call,
+)
+from swarm.utils.idempotency import IdempotencyGuard
 
 logger = structlog.get_logger(__name__)
+
+
+def _connector_system(connector: object) -> str:
+    system = getattr(connector, "system", None)
+    if isinstance(system, str):
+        return system
+    return type(connector).__name__.lower()
 
 
 class ExecutionTrackingAgent(BaseAgent):
@@ -53,9 +66,12 @@ class ExecutionTrackingAgent(BaseAgent):
         self,
         *,
         connector: SupplierConnector | None = None,
+        base_connector: BaseConnector | None = None,
     ) -> None:
         super().__init__()
         self._connector = connector if connector is not None else default_connector
+        self._base_connector = base_connector
+        self._guard = IdempotencyGuard()
         self._correlation_id: str | None = None
         self._pending = False
         self._order_artifact: str = "purchase_order"
@@ -132,13 +148,13 @@ class ExecutionTrackingAgent(BaseAgent):
             created_at=str(order_artifact.data.get("created_at", "")),
             submitted_at=order_artifact.data.get("submitted_at"),
         )
-        status = self._connector.track_order(order)
-        lifecycle = self._connector.order_lifecycle(order)
+        decision_id = str(order_artifact.data.get("decision_id", ""))
+        status_value, lifecycle = self._track_order(state, order, decision_id)
         artifact = ExecutionStatusArtifact(
             data={
                 "order_id": order.order_id,
                 "purchase_order_id": order_artifact.id,
-                "status": status.value,
+                "status": status_value,
                 "lifecycle": lifecycle,
                 "tracked_at": datetime.now(UTC).isoformat(),
             },
@@ -152,3 +168,42 @@ class ExecutionTrackingAgent(BaseAgent):
         )
         state.put_artifact(artifact)
         return artifact
+
+    def _track_order(
+        self, state: SwarmState, order: PurchaseOrder, decision_id: str
+    ) -> tuple[str, list[str]]:
+        """Resolve the order's realized status via the configured connector.
+
+        Uses the :class:`BaseConnector` path when configured (deduplicated by the
+        :class:`IdempotencyGuard` and emitting an :class:`ExternalCallArtifact`);
+        otherwise falls back to the legacy :class:`SupplierConnector` path.
+        """
+        if self._base_connector is not None:
+            system = _connector_system(self._base_connector)
+            if self._guard.check(decision_id, "get_order_status"):
+                existing = state.get_artifact(EXECUTION_STATUS_ARTIFACT_NAME)
+                if existing is not None:
+                    return (
+                        str(existing.data.get("status", order.status.value)),
+                        list(existing.data.get("lifecycle", [])),
+                    )
+            external = self._base_connector.get_order_status(order.order_id)
+            self._guard.mark(decision_id, "get_order_status")
+            record_external_call(
+                state,
+                system=system,
+                action="get_order_status",
+                request_payload={"order_id": order.order_id},
+                response_payload=(
+                    external.__dict__ if isinstance(external, ExternalStatus) else {}
+                ),
+                status="success" if external.status else "error",
+                order_id=order.order_id,
+                decision_id=decision_id,
+                idempotency_key=f"{decision_id}:get_order_status",
+                correlation_id=self._correlation_id,
+                created_by=self.name,
+            )
+            return external.status, list(external.lifecycle)
+        status = self._connector.track_order(order)
+        return status.value, self._connector.order_lifecycle(order)
