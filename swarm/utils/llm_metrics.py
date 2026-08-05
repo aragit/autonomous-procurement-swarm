@@ -35,11 +35,7 @@ def compute_llm_metrics(
         }
 
     total = len(history)
-    accepted = sum(
-        1
-        for r in history
-        if r.get("decision_reason", "accepted") == "accepted"
-    )
+    accepted = sum(1 for r in history if r.get("decision_reason", "accepted") == "accepted")
     confidences = [r.get("confidence", 0.0) for r in history]
     stabilities = [r.get("stability", 0.0) for r in history]
     trusts = [r.get("trust", 0.0) for r in history]

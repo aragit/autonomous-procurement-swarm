@@ -55,13 +55,15 @@ def aggregate_explanations(
         stab = record.get("stability", 0.0)
         trust = record.get("trust", 0.0)
         reason = record.get("decision_reason", "unknown")
-        rounds.append({
-            "round": record.get("round", 0),
-            "confidence": round(conf, 4),
-            "stability": round(stab, 4),
-            "trust": round(trust, 4),
-            "reason": reason,
-        })
+        rounds.append(
+            {
+                "round": record.get("round", 0),
+                "confidence": round(conf, 4),
+                "stability": round(stab, 4),
+                "trust": round(trust, 4),
+                "reason": reason,
+            }
+        )
         confidences.append(conf)
         stabilities.append(stab)
         trusts.append(trust)

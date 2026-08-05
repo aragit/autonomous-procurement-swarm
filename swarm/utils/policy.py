@@ -12,19 +12,15 @@ produces the same output, with no side effects or LLM calls.
 
 from __future__ import annotations
 
-#: Minimum allowed weight for delivery (score_weight).
-MIN_DELIVERY_WEIGHT = 0.3
-
-#: Maximum allowed weight for price (price_weight).
-MAX_PRICE_WEIGHT = 0.7
+from swarm.config import POLICY_DELIVERY_MIN, POLICY_PRICE_MAX
 
 
 def apply_policy_constraints(weights: dict[str, float]) -> dict[str, float]:
     """Apply deterministic business constraints to price/delivery weights.
 
     Enforces:
-      - ``delivery >= MIN_DELIVERY_WEIGHT`` (0.3)
-      - ``price <= MAX_PRICE_WEIGHT`` (0.7)
+      - ``delivery >= POLICY_DELIVERY_MIN``
+      - ``price <= POLICY_PRICE_MAX``
 
     After clamping, the two weights are normalised to sum to 1.0 so the
     output is always a valid 2-field distribution.
@@ -40,8 +36,8 @@ def apply_policy_constraints(weights: dict[str, float]) -> dict[str, float]:
     delivery = float(weights.get("delivery", 0.5))
 
     # Step A: enforce bounds
-    price = min(price, MAX_PRICE_WEIGHT)
-    delivery = max(delivery, MIN_DELIVERY_WEIGHT)
+    price = min(price, POLICY_PRICE_MAX)
+    delivery = max(delivery, POLICY_DELIVERY_MIN)
 
     # Step C: normalise (ensures price + delivery == 1.0)
     total = price + delivery

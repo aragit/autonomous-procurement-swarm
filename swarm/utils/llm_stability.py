@@ -23,9 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 #: Adjustment fields recognised during stability computation.
-_STABILITY_FIELDS = frozenset(
-    {"price_weight_delta", "delivery_weight_delta"}
-)
+_STABILITY_FIELDS = frozenset({"price_weight_delta", "delivery_weight_delta"})
 
 #: Minimum history depth required for a meaningful stability score.
 _MIN_HISTORY = 2

@@ -67,9 +67,7 @@ def test_state_artifacts_by_kind():
 
 def test_state_artifact_serialization_roundtrip():
     state = SwarmState(request_id="REQ-1")
-    state.put_artifact(
-        Artifact(kind="requirement", name="requirement", data={"item": "laptops"})
-    )
+    state.put_artifact(Artifact(kind="requirement", name="requirement", data={"item": "laptops"}))
     restored = SwarmState.from_dict(state.to_dict())
     assert restored == state
     assert restored.get_artifact("requirement").data == {"item": "laptops"}

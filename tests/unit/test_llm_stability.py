@@ -192,3 +192,31 @@ def test_stability_value_is_rounded() -> None:
     # Delivery drift: abs_diff = 0.08, drift = 0.3333...
     # mean drift = 0.3333..., stability = 0.6667
     assert result == pytest.approx(0.6667, abs=0.001)
+
+
+class TestStabilityToleranceConfigurable:
+    def test_raising_tolerance_reduces_drift_penalty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With a larger tolerance, the same drift produces less penalty."""
+        monkeypatch.setattr("swarm.utils.llm_stability.TOLERANCE", 0.08)
+        history = [
+            _history_round(1, -0.05, 0.05),
+            _history_round(2, 0.05, -0.05),
+        ]
+        result = compute_temporal_stability(history)
+        # With tolerance=0.08: abs_diff=0.10, drift=(0.10-0.08)/(0.2-0.08)=0.02/0.12≈0.167
+        # stability≈0.833
+        assert result > 0.8
+
+    def test_lowering_tolerance_increases_drift_penalty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a smaller tolerance, the same drift produces more penalty."""
+        monkeypatch.setattr("swarm.utils.llm_stability.TOLERANCE", 0.0)
+        history = [
+            _history_round(1, -0.05, 0.05),
+            _history_round(2, 0.05, -0.05),
+        ]
+        result = compute_temporal_stability(history)
+        # With tolerance=0.0: abs_diff=0.10, drift=0.10/0.2=0.5
+        # stability=0.5
+        assert result < 0.6

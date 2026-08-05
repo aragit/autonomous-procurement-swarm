@@ -184,9 +184,7 @@ def test_swarm_state_is_mutable():
     assert state.request_id == "REQ-001"
     assert state.goal == "source 500 laptops"
 
-    state.put_artifact(
-        Artifact(kind="requirement", name="requirement", data={"quantity": 500})
-    )
+    state.put_artifact(Artifact(kind="requirement", name="requirement", data={"quantity": 500}))
     state.results["winner"] = "supplier_a"
     state.events.append(Event(type="supplier_search_requested", source="requirement_agent"))
 

@@ -26,9 +26,7 @@ def seed_decision(state: SwarmState, *, supplier_id: str = "MinerCorp_A") -> Non
                 "selected_supplier": supplier_id,
                 "reasoning": {
                     "criteria": "score",
-                    "ranked": [
-                        {"supplier_id": supplier_id, "price": 984.0, "policy_passed": True}
-                    ],
+                    "ranked": [{"supplier_id": supplier_id, "price": 984.0, "policy_passed": True}],
                 },
             },
             created_by="decision_agent",

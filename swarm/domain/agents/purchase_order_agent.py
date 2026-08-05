@@ -185,9 +185,7 @@ class PurchaseOrderAgent(BaseAgent):
             quote_artifact=quote,
         )
         status, reference_id, _ = self._submit_order(state, order, str(decision.id))
-        order = replace(
-            order, status=status, submitted_at=datetime.now(UTC).isoformat()
-        )
+        order = replace(order, status=status, submitted_at=datetime.now(UTC).isoformat())
         data = order_to_dict(order)
         data["purchase_order_id"] = data["order_id"]
         if reference_id:
@@ -222,9 +220,7 @@ class PurchaseOrderAgent(BaseAgent):
             if self._guard.check(decision_id, "submit_order"):
                 existing = state.get_artifact(PURCHASE_ORDER_ARTIFACT_NAME)
                 if existing is not None:
-                    current = PurchaseStatus(
-                        str(existing.data.get("status", order.status.value))
-                    )
+                    current = PurchaseStatus(str(existing.data.get("status", order.status.value)))
                     return (
                         current,
                         str(existing.data.get("reference_id", "")),

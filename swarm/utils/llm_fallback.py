@@ -17,13 +17,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from swarm.config import (
+    CONFIDENCE_THRESHOLD,
+    STABILITY_THRESHOLD,
+    TRUST_THRESHOLD,
+)
+
 
 def evaluate_llm_usage(
     has_completions: bool,
     confidence: float,
     stability: float,
     trust: float,
-    threshold: float,
 ) -> dict[str, Any]:
     """Evaluate whether LLM influence should be used, with a deterministic reason.
 
@@ -36,7 +41,6 @@ def evaluate_llm_usage(
         confidence: The consensus confidence score (0 → 1).
         stability: The temporal stability score (0 → 1).
         trust: The computed trust score = confidence × stability.
-        threshold: The minimum value for each gate.
 
     Returns:
         A dict with ``use_llm`` (bool) and ``reason`` (str).
@@ -44,13 +48,13 @@ def evaluate_llm_usage(
     if not has_completions:
         return {"use_llm": False, "reason": "no_llm_data"}
 
-    if confidence < threshold:
+    if confidence < CONFIDENCE_THRESHOLD:
         return {"use_llm": False, "reason": "low_confidence"}
 
-    if stability < threshold:
+    if stability < STABILITY_THRESHOLD:
         return {"use_llm": False, "reason": "low_stability"}
 
-    if trust < threshold:
+    if trust < TRUST_THRESHOLD:
         return {"use_llm": False, "reason": "low_trust"}
 
     return {"use_llm": True, "reason": "accepted"}

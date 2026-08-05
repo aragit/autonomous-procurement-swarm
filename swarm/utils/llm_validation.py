@@ -22,9 +22,7 @@ DELTA_BOUND = 0.1
 #: The only adjustment fields the system recognizes.
 #: ``delivery_weight_delta`` maps to ``score_weight`` (delivery time is a
 #: component of the evaluation score).
-_ALLOWED_ADJUSTMENT_FIELDS = frozenset(
-    {"price_weight_delta", "delivery_weight_delta"}
-)
+_ALLOWED_ADJUSTMENT_FIELDS = frozenset({"price_weight_delta", "delivery_weight_delta"})
 
 
 def validate_strategy_adjustments(adjustments: dict[str, Any]) -> dict[str, float]:

@@ -12,7 +12,6 @@ always yields the same performance records. There is no autonomous learning —
 metrics are running averages maintained by a clean, single-writer update rule.
 """
 
-
 from typing import Any
 
 import structlog

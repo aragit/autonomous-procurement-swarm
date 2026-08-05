@@ -130,9 +130,7 @@ class EvaluationAgent(BaseAgent):
             4,
         )
         history = self._supplier_history(state)
-        adjustment = (
-            SupplierMemoryStore.history_adjustment(history) if history is not None else 0.0
-        )
+        adjustment = SupplierMemoryStore.history_adjustment(history) if history is not None else 0.0
         score = round(max(0.0, min(1.0, base_score + adjustment)), 4)
         breakdown = {
             "price": price,
@@ -234,9 +232,7 @@ class EvaluationAgent(BaseAgent):
         self._evaluation = None
 
     @staticmethod
-    def _find_supplier(
-        pool: Any, supplier_id: str
-    ) -> dict[str, Any] | None:
+    def _find_supplier(pool: Any, supplier_id: str) -> dict[str, Any] | None:
         """The pool entry matching ``supplier_id``, or None."""
         for supplier in pool.data["suppliers"]:
             if str(supplier["supplier_id"]) == supplier_id:

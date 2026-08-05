@@ -142,9 +142,7 @@ async def test_stable_history_enables_trust_and_adjustments() -> None:
 
     # Current completions also stable
     for variant in range(3):
-        _seed_completion_with_output(
-            state, _completion_output(-0.05, 0.05), variant=variant
-        )
+        _seed_completion_with_output(state, _completion_output(-0.05, 0.05), variant=variant)
 
     await drive(StrategyAgent(), state, _requirement_event())
 
@@ -189,9 +187,7 @@ async def test_divergent_history_blocks_trust_despite_high_confidence() -> None:
 
     # Current completions are high-confidence but differ from history
     for variant in range(3):
-        _seed_completion_with_output(
-            state, _completion_output(-0.05, 0.05), variant=variant
-        )
+        _seed_completion_with_output(state, _completion_output(-0.05, 0.05), variant=variant)
 
     await drive(StrategyAgent(), state, _requirement_event())
 
@@ -220,9 +216,7 @@ async def test_single_consensus_record_has_zero_stability() -> None:
 
     # Only completions, no pre-seeded history
     for variant in range(3):
-        _seed_completion_with_output(
-            state, _completion_output(-0.05, 0.05), variant=variant
-        )
+        _seed_completion_with_output(state, _completion_output(-0.05, 0.05), variant=variant)
 
     await drive(StrategyAgent(), state, _requirement_event())
 
@@ -272,9 +266,7 @@ async def test_re_evaluation_on_quotes_completed_updates_trust() -> None:
 
     # Seed completions before the first run (simulating prior LLM analysis)
     for variant in range(3):
-        _seed_completion_with_output(
-            state, _completion_output(-0.05, 0.05), variant=variant
-        )
+        _seed_completion_with_output(state, _completion_output(-0.05, 0.05), variant=variant)
 
     # Initial: RequirementCreated
     await drive(StrategyAgent(), state, _requirement_event())
@@ -305,9 +297,7 @@ async def test_re_evaluation_does_not_publish_strategy_selected() -> None:
     bus.subscribe(ProcurementEventType.STRATEGY_SELECTED, capture)
 
     for variant in range(3):
-        _seed_completion_with_output(
-            state, _completion_output(-0.05, 0.05), variant=variant
-        )
+        _seed_completion_with_output(state, _completion_output(-0.05, 0.05), variant=variant)
 
     # Drive the SAME agent instance on QuotesCompleted
     agent = StrategyAgent()
@@ -326,14 +316,13 @@ async def test_re_evaluation_does_not_publish_strategy_selected() -> None:
 @pytest.mark.asyncio
 async def test_replay_produces_identical_trust_scores() -> None:
     """Replaying the same sequence must produce identical trust records."""
+
     def _build_state() -> SwarmState:
         state = SwarmState(request_id="REQ-REPLAY-TRUST", goal="strat")
         _seed_balanced_requirement(state)
         _seed_consensus_history(state, rounds=2)
         for variant in range(3):
-            _seed_completion_with_output(
-                state, _completion_output(-0.05, 0.05), variant=variant
-            )
+            _seed_completion_with_output(state, _completion_output(-0.05, 0.05), variant=variant)
         return state
 
     state1 = _build_state()
@@ -362,25 +351,17 @@ async def test_timeline_shows_consensus_history_artifacts() -> None:
     _seed_consensus_history(state, rounds=2)
 
     for variant in range(3):
-        _seed_completion_with_output(
-            state, _completion_output(-0.05, 0.05), variant=variant
-        )
+        _seed_completion_with_output(state, _completion_output(-0.05, 0.05), variant=variant)
 
     await drive(StrategyAgent(), state, _requirement_event())
 
     timeline = build_timeline(state)
 
-    cognitive_items = [
-        i for i in timeline.timeline
-        if i.phase == "cognitive"
-    ]
+    cognitive_items = [i for i in timeline.timeline if i.phase == "cognitive"]
     # 3 LLM completions + 2 pre-seeded consensus + 1 new consensus = 6 cognitive artifacts
     assert len(cognitive_items) >= 5
 
-    consensus_items = [
-        i for i in timeline.timeline
-        if i.subtype == "llm_consensus"
-    ]
+    consensus_items = [i for i in timeline.timeline if i.subtype == "llm_consensus"]
     assert len(consensus_items) == 3
 
     for item in consensus_items:

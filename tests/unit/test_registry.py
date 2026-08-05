@@ -149,9 +149,7 @@ def test_best_for_capability_requires_all_tags():
 
     assert registry.best_for_capability("supplier.evaluate", region="EU").name == "eu"
     assert (
-        registry.best_for_capability(
-            "supplier.evaluate", region="EU", material="aluminum"
-        ).name
+        registry.best_for_capability("supplier.evaluate", region="EU", material="aluminum").name
         == "global"
     )
 

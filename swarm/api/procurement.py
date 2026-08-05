@@ -54,9 +54,7 @@ async def run_swarm(trace_id: str, requirement: RequirementPayload) -> Swarm:
     """Build and run the procurement swarm for a requirement."""
     swarm = build_procurement_swarm(
         request_id=trace_id,
-        goal=requirement.goal or (
-            f"Source {requirement.quantity} units of {requirement.material}"
-        ),
+        goal=requirement.goal or (f"Source {requirement.quantity} units of {requirement.material}"),
     )
     await swarm.start()
     correlation_id = f"{trace_id}-CONV"

@@ -116,9 +116,7 @@ class SupplierDiscoveryAgent(BaseAgent):
         if event.type == ProcurementEventType.STRATEGY_SELECTED:
             self._pending = True
             self._correlation_id = event.correlation_id
-            self._strategy_artifact = str(
-                event.payload.get("artifact", STRATEGY_ARTIFACT_NAME)
-            )
+            self._strategy_artifact = str(event.payload.get("artifact", STRATEGY_ARTIFACT_NAME))
         elif event.type == ProcurementEventType.REQUIREMENT_CREATED:
             if event.correlation_id in self._discovered_for:
                 return

@@ -34,13 +34,17 @@ def build_history(
     perf = SupplierPerformance(supplier_id)
     for _ in range(on_time):
         perf = perf.apply_outcome(
-            delivered_on_time=True, quality_score=quality,
-            price_competitiveness=1.0, carbon_score=1800.0,
+            delivered_on_time=True,
+            quality_score=quality,
+            price_competitiveness=1.0,
+            carbon_score=1800.0,
         )
     for _ in range(orders - on_time):
         perf = perf.apply_outcome(
-            delivered_on_time=False, quality_score=quality,
-            price_competitiveness=1.0, carbon_score=1800.0,
+            delivered_on_time=False,
+            quality_score=quality,
+            price_competitiveness=1.0,
+            carbon_score=1800.0,
         )
     return perf
 
@@ -101,7 +105,10 @@ def seed_context(
                 "supplier_id": supplier,
                 "score": eval_score,
                 "breakdown": {
-                    "price": 0.9, "lead_time": 0.8, "esg": 0.95, "reliability": 0.85,
+                    "price": 0.9,
+                    "lead_time": 0.8,
+                    "esg": 0.95,
+                    "reliability": 0.85,
                 },
                 "strategy": {"strategy_name": "balanced", "weights": {}},
                 "history": {
@@ -154,8 +161,13 @@ async def test_low_risk_full_flow_is_authorized() -> None:
     await swarm.start()
     await swarm.send_message(
         CREATE_REQUIREMENT_INTENT,
-        {"text": "Source 1000 units of aluminum", "material": "aluminum",
-         "quantity": 1000, "budget": 2_000_000.0, "target_lead_time_days": 30},
+        {
+            "text": "Source 1000 units of aluminum",
+            "material": "aluminum",
+            "quantity": 1000,
+            "budget": 2_000_000.0,
+            "target_lead_time_days": 30,
+        },
         sender="user",
         correlation_id="REQ-GOV-LOW-CONV",
     )
@@ -345,9 +357,7 @@ async def test_contract_rejection_short_circuits_to_rejected_governance() -> Non
 
     # Approval publishes a rejection but no authorization artifact is created.
     assert state.get_artifact("execution_authorization") is None
-    rejected = [
-        e for e in state.events if e.type == ProcurementEventType.APPROVAL_REJECTED
-    ]
+    rejected = [e for e in state.events if e.type == ProcurementEventType.APPROVAL_REJECTED]
     assert len(rejected) == 1
     assert rejected[0].payload["authorization_status"] == "rejected"
     assert ProcurementEventType.APPROVAL_GRANTED not in events

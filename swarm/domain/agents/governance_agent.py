@@ -14,7 +14,6 @@ compliance at the award stage); this is the post-decision safety and
 authorization gate.
 """
 
-
 import structlog
 
 from swarm.core.agent import BaseAgent

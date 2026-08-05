@@ -66,9 +66,7 @@ class ConnectorConfig:
                 f"Unsupported connector provider {self.provider!r}; expected one of {PROVIDERS}"
             )
         if self.mode not in MODES:
-            raise ValueError(
-                f"Unsupported connector mode {self.mode!r}; expected one of {MODES}"
-            )
+            raise ValueError(f"Unsupported connector mode {self.mode!r}; expected one of {MODES}")
 
     @property
     def environment(self) -> str:
@@ -112,9 +110,7 @@ def build_connector(config: ConnectorConfig) -> BaseConnector:
         return SupplierAPIConnector(endpoint=config.endpoint, api_key=api_key)
     if provider in _ERP_BUILDERS:
         return _ERP_BUILDERS[provider](_erp_config(config))
-    raise ValueError(
-        f"Unsupported connector provider {provider!r}; expected one of {PROVIDERS}"
-    )
+    raise ValueError(f"Unsupported connector provider {provider!r}; expected one of {PROVIDERS}")
 
 
 def get_connector_config_from_env() -> ConnectorConfig:

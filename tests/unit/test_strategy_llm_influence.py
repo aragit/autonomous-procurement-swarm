@@ -338,12 +338,36 @@ async def test_strategy_without_llm_has_zero_confidence() -> None:
 async def test_strategy_name_invariant_under_high_confidence_influence() -> None:
     """Even with accepted adjustments, strategy name must not change."""
     for strat_name, constraints in [
-        ("balanced", {"material": "aluminum", "quantity": 1000, "budget": 2_000_000.0,
-                        "max_unit_price": 2640.0, "max_carbon_per_unit": None}),
-        ("low_carbon", {"material": "aluminum", "quantity": 1000, "budget": 2_000_000.0,
-                        "max_unit_price": 2640.0, "max_carbon_per_unit": 800.0}),
-        ("cost_optimized", {"material": "aluminum", "quantity": 1000, "budget": 500_000.0,
-                            "max_unit_price": 2640.0, "max_carbon_per_unit": None}),
+        (
+            "balanced",
+            {
+                "material": "aluminum",
+                "quantity": 1000,
+                "budget": 2_000_000.0,
+                "max_unit_price": 2640.0,
+                "max_carbon_per_unit": None,
+            },
+        ),
+        (
+            "low_carbon",
+            {
+                "material": "aluminum",
+                "quantity": 1000,
+                "budget": 2_000_000.0,
+                "max_unit_price": 2640.0,
+                "max_carbon_per_unit": 800.0,
+            },
+        ),
+        (
+            "cost_optimized",
+            {
+                "material": "aluminum",
+                "quantity": 1000,
+                "budget": 500_000.0,
+                "max_unit_price": 2640.0,
+                "max_carbon_per_unit": None,
+            },
+        ),
     ]:
         state = SwarmState(request_id=f"REQ-{strat_name}-INV", goal="strat")
         state.put_artifact(
@@ -373,6 +397,7 @@ async def test_strategy_name_invariant_under_high_confidence_influence() -> None
 @pytest.mark.asyncio
 async def test_replay_produces_identical_llm_influence() -> None:
     """Replaying the same run must produce identical influence records."""
+
     def _build_state() -> SwarmState:
         state = SwarmState(request_id="REQ-REPLAY-CONF", goal="strat")
         _seed_balanced_requirement(state)
@@ -463,9 +488,7 @@ async def test_timeline_shows_consensus_and_influence() -> None:
 def test_get_all_llm_completions_returns_all_variants() -> None:
     state = SwarmState(request_id="REQ-GETALL-1", goal="strat")
     for variant, (p, d) in enumerate([(-0.05, 0.05), (-0.04, 0.04), (-0.06, 0.06)]):
-        _seed_completion_with_output(
-            state, _completion_output(p, d), variant=variant
-        )
+        _seed_completion_with_output(state, _completion_output(p, d), variant=variant)
 
     all_completions = get_all_llm_completions(state, correlation_id=CORRELATION_ID)
     assert len(all_completions) == 3
@@ -478,9 +501,7 @@ def test_get_all_llm_completions_empty_when_no_llm() -> None:
 
 def test_get_all_llm_completions_ignores_prompts() -> None:
     state = SwarmState(request_id="REQ-GETALL-3", goal="strat")
-    _seed_completion_with_output(
-        state, _completion_output(-0.05, 0.05), variant=0
-    )
+    _seed_completion_with_output(state, _completion_output(-0.05, 0.05), variant=0)
     record_llm_artifact(
         state,
         model="stub",
@@ -508,9 +529,7 @@ async def test_strategy_reads_multi_variant_completions() -> None:
     _seed_consensus_history(state, rounds=2)
 
     for variant, (p, d) in enumerate([(-0.05, 0.05), (-0.04, 0.04), (-0.06, 0.06)]):
-        _seed_completion_with_output(
-            state, _completion_output(p, d), variant=variant
-        )
+        _seed_completion_with_output(state, _completion_output(p, d), variant=variant)
 
     await drive(StrategyAgent(), state, _requirement_event())
 

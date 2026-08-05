@@ -133,9 +133,7 @@ class SupplierAnalysisLLMAgent(BaseAgent):
 
         parent_id = prompt_artifact.id
         for variant in range(NUM_COMPLETION_VARIANTS):
-            llm_output = self._call_llm_stub(
-                SUPPLIER_ANALYSIS_PROMPT, self._input_payload, variant
-            )
+            llm_output = self._call_llm_stub(SUPPLIER_ANALYSIS_PROMPT, self._input_payload, variant)
             record_llm_artifact(
                 state,
                 model="stub",
@@ -180,9 +178,7 @@ class SupplierAnalysisLLMAgent(BaseAgent):
             "requirement": {
                 "material": constraints.get("material"),
                 "quantity": int(constraints.get("quantity") or 0),
-                "target_lead_time_days": int(
-                    constraints.get("target_lead_time_days") or 0
-                ),
+                "target_lead_time_days": int(constraints.get("target_lead_time_days") or 0),
                 "budget": float(constraints.get("budget") or 0.0),
                 "max_unit_price": constraints.get("max_unit_price"),
             },

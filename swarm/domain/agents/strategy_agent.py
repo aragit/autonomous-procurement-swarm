@@ -60,6 +60,7 @@ from typing import Any
 
 import structlog
 
+from swarm.config import TRUST_THRESHOLD
 from swarm.core.agent import BaseAgent
 from swarm.core.capability import Capability
 from swarm.core.event import Event
@@ -78,7 +79,7 @@ from swarm.utils.llm_fallback import evaluate_llm_usage
 from swarm.utils.llm_memory import get_llm_consensus_history, record_llm_consensus
 from swarm.utils.llm_metrics import compute_llm_metrics
 from swarm.utils.llm_reader import get_all_llm_completions, get_latest_llm_completion
-from swarm.utils.llm_stability import TRUST_THRESHOLD, compute_temporal_stability
+from swarm.utils.llm_stability import compute_temporal_stability
 from swarm.utils.llm_validation import validate_strategy_adjustments
 from swarm.utils.policy import apply_policy_constraints
 
@@ -131,9 +132,7 @@ class StrategyAgent(BaseAgent):
             self._requirement_artifact = str(
                 event.payload.get("artifact", REQUIREMENT_ARTIFACT_NAME)
             )
-            self._is_re_evaluation = (
-                event.type == ProcurementEventType.QUOTES_COMPLETED
-            )
+            self._is_re_evaluation = event.type == ProcurementEventType.QUOTES_COMPLETED
             self._strategy = None
             self._llm_context = None
             self._validated_adjustments = {}
@@ -198,7 +197,6 @@ class StrategyAgent(BaseAgent):
                 confidence=confidence,
                 stability=self._stability,
                 trust=self._trust_score,
-                threshold=TRUST_THRESHOLD,
             )
 
             record_llm_consensus(
@@ -209,10 +207,13 @@ class StrategyAgent(BaseAgent):
                 stability=self._stability,
                 trust=self._trust_score,
                 decision_reason=self._llm_decision.get("reason", "accepted"),
-                parent_ids=[c.id for c in state.find_artifacts(
-                    kind="llm",
-                    correlation_id=self._correlation_id,
-                )],
+                parent_ids=[
+                    c.id
+                    for c in state.find_artifacts(
+                        kind="llm",
+                        correlation_id=self._correlation_id,
+                    )
+                ],
                 by=self.name,
             )
         else:
@@ -224,7 +225,6 @@ class StrategyAgent(BaseAgent):
                 confidence=self._consensus.get("confidence", 0.0),
                 stability=0.0,
                 trust=0.0,
-                threshold=TRUST_THRESHOLD,
             )
 
         # Step 9: The fallback decision was computed above alongside the
@@ -232,9 +232,7 @@ class StrategyAgent(BaseAgent):
         if self._llm_decision["use_llm"]:
             aggregated = self._consensus.get("aggregated_adjustments", {})
             self._raw_adjustments = aggregated
-            self._validated_adjustments = validate_strategy_adjustments(
-                aggregated
-            )
+            self._validated_adjustments = validate_strategy_adjustments(aggregated)
         else:
             self._raw_adjustments = {}
             self._validated_adjustments = {}
@@ -307,12 +305,8 @@ class StrategyAgent(BaseAgent):
         if not self._validated_adjustments or not base:
             return base
 
-        price = base["price_weight"] + self._validated_adjustments.get(
-            "price_weight_delta", 0.0
-        )
-        score = base["score_weight"] + self._validated_adjustments.get(
-            "delivery_weight_delta", 0.0
-        )
+        price = base["price_weight"] + self._validated_adjustments.get("price_weight_delta", 0.0)
+        score = base["score_weight"] + self._validated_adjustments.get("delivery_weight_delta", 0.0)
         carbon = base["carbon_weight"]
 
         # Clamp each weight to [0, 1] (hard constraint: never negative)

@@ -81,10 +81,7 @@ class ContractValidationAgent(BaseAgent):
             self._pending = False
             return
         self._decision_id = str(decision.id)
-        self._supplier_id = (
-            self._supplier_id
-            or str(decision.data.get("selected_supplier") or "")
-        )
+        self._supplier_id = self._supplier_id or str(decision.data.get("selected_supplier") or "")
         self._material, self._unit_price = self._line_details(state)
         logger.info(
             "agent_executing",

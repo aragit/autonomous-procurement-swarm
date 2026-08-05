@@ -72,9 +72,7 @@ class SwarmState(BaseModel):
             ]
         if correlation_id is not None:
             matches = [
-                artifact
-                for artifact in matches
-                if artifact.correlation_id == correlation_id
+                artifact for artifact in matches if artifact.correlation_id == correlation_id
             ]
         return matches
 
@@ -127,9 +125,7 @@ class SwarmState(BaseModel):
         """
         events = [event for event in self.events if event.correlation_id == correlation_id]
         artifacts = [
-            artifact
-            for artifact in self.artifacts
-            if artifact.correlation_id == correlation_id
+            artifact for artifact in self.artifacts if artifact.correlation_id == correlation_id
         ]
 
         agent_actions: list[dict[str, Any]] = []

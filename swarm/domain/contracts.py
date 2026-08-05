@@ -133,7 +133,6 @@ class Contract:
         if not self.pricing_ok(material, unit_price):
             return (
                 False,
-                f"Unit price {unit_price} exceeds contract {self.contract_id} cap "
-                f"for {material}",
+                f"Unit price {unit_price} exceeds contract {self.contract_id} cap for {material}",
             )
         return True, None

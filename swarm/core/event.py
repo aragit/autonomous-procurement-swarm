@@ -147,9 +147,7 @@ class EventBus:
         history into a fresh runtime.
         """
         events = [
-            event
-            for event in self._event_log
-            if event_type is None or event.type == event_type
+            event for event in self._event_log if event_type is None or event.type == event_type
         ]
         logger.info(
             "event_replay",

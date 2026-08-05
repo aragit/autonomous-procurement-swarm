@@ -49,9 +49,7 @@ def clamp01(value: float) -> float:
     return min(1.0, max(0.0, value))
 
 
-def financial_risk_score(
-    purchase_amount: float, max_purchase_amount: float
-) -> float:
+def financial_risk_score(purchase_amount: float, max_purchase_amount: float) -> float:
     """Risk from the purchase size relative to the policy ceiling.
 
     A purchase at the ceiling is moderate risk (0.5); twice the ceiling is the

@@ -253,9 +253,7 @@ async def test_execution_tracking_publishes_status_updated() -> None:
     bus = await drive(agent, state, purchase_order_created_event())
 
     updated = [
-        e
-        for e in bus.event_log()
-        if e.type == ProcurementEventType.EXECUTION_STATUS_UPDATED
+        e for e in bus.event_log() if e.type == ProcurementEventType.EXECUTION_STATUS_UPDATED
     ]
     assert len(updated) == 1
     assert updated[0].payload["status"] == "DELIVERED"

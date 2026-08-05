@@ -33,9 +33,7 @@ def _risk(
 
 
 def test_low_risk_within_amount_is_approved() -> None:
-    decision = GovernanceDecision.from_risk(
-        _risk(0.1, RiskLevel.LOW, 984_000.0), STANDARD_POLICY
-    )
+    decision = GovernanceDecision.from_risk(_risk(0.1, RiskLevel.LOW, 984_000.0), STANDARD_POLICY)
     assert decision.status == GovernanceStatus.APPROVED
     assert decision.required_approver is None
     assert decision.policy_used == "standard"
@@ -69,9 +67,7 @@ def test_critical_risk_is_rejected() -> None:
 
 def test_score_above_max_risk_is_rejected() -> None:
     # HIGH level but overall exceeds the strict policy's lower max_risk_score.
-    decision = GovernanceDecision.from_risk(
-        _risk(0.7, RiskLevel.HIGH, 6_000_000.0), STRICT_POLICY
-    )
+    decision = GovernanceDecision.from_risk(_risk(0.7, RiskLevel.HIGH, 6_000_000.0), STRICT_POLICY)
     assert decision.status == GovernanceStatus.REJECTED
 
 

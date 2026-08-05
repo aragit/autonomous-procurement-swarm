@@ -89,10 +89,7 @@ async def test_full_procurement_flow_emits_per_supplier_and_completion_events():
     for domain_event in DOMAIN_EVENTS:
         assert domain_event in types
 
-    per_supplier = {
-        event_type: types.count(event_type)
-        for event_type in PER_SUPPLIER_EVENTS
-    }
+    per_supplier = {event_type: types.count(event_type) for event_type in PER_SUPPLIER_EVENTS}
     assert per_supplier == {
         ProcurementEventType.SUPPLIER_DISCOVERED: 5,
         ProcurementEventType.SUPPLIER_EVALUATED: 5,
@@ -179,9 +176,7 @@ async def test_manual_registration_matches_wiring_subscriptions():
     """The wiring module's subscriptions mirror the manual Phase 2 style."""
     swarm = Swarm(request_id="REQ-002", goal="Source 1000 units of aluminum")
     swarm.register(RequirementAgent(), event_types=[SwarmEventType.MESSAGE])
-    swarm.register(
-        SupplierDiscoveryAgent(), event_types=[ProcurementEventType.REQUIREMENT_CREATED]
-    )
+    swarm.register(SupplierDiscoveryAgent(), event_types=[ProcurementEventType.REQUIREMENT_CREATED])
     swarm.register(EvaluationAgent(), event_types=[ProcurementEventType.SUPPLIER_DISCOVERED])
     swarm.register(NegotiationAgent(), event_types=[ProcurementEventType.SUPPLIER_EVALUATED])
     swarm.register(DecisionAgent(), event_types=[ProcurementEventType.QUOTES_COMPLETED])

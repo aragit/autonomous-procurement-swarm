@@ -1,6 +1,5 @@
 """Unit tests for the Phase 6 RiskAssessmentAgent."""
 
-
 import pytest
 
 from swarm import Event, SwarmState
@@ -173,8 +172,6 @@ async def test_risk_agent_ignores_replayed_events() -> None:
     seed_requirement(state)
     seed_quote(state)
     agent.state = state
-    await agent.step(
-        contract_validated_event().model_copy(update={"replayed": True})
-    )
+    await agent.step(contract_validated_event().model_copy(update={"replayed": True}))
 
     assert state.find_artifacts(kind="risk_assessment") == []

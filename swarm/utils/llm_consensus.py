@@ -18,13 +18,12 @@ from __future__ import annotations
 from statistics import mean
 from typing import Any
 
+from swarm.config import CONFIDENCE_THRESHOLD
+
 #: The only adjustment fields recognized during consensus.
-_CONSENSUS_FIELDS = frozenset(
-    {"price_weight_delta", "delivery_weight_delta"}
-)
+_CONSENSUS_FIELDS = frozenset({"price_weight_delta", "delivery_weight_delta"})
 
 #: Minimum confidence for adjustments to be aggregated (vs. discarded).
-CONFIDENCE_THRESHOLD = 0.7
 
 
 def compute_llm_consensus(completions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -93,7 +92,7 @@ def compute_llm_consensus(completions: list[dict[str, Any]]) -> dict[str, Any]:
         if len(values) == 1:
             field_agreements.append(1.0)
             continue
-         # Agreement = 1 - normalized_range
+        # Agreement = 1 - normalized_range
         # Range is max - min; normalize by max possible range for ±0.1 bounds (=0.2)
         value_range = max(values) - min(values)
         agreement = max(0.0, 1.0 - (value_range / 0.2))

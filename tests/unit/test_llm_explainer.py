@@ -4,7 +4,6 @@ Tests ``build_llm_explanation`` — the purely observational explanation builder
 that explains accepted/rejected decisions without affecting behavior.
 """
 
-
 from swarm.utils.llm_explainer import build_llm_explanation
 from swarm.utils.llm_stability import TRUST_THRESHOLD
 
@@ -32,9 +31,7 @@ def test_explanation_accepted_summary_format() -> None:
         threshold=0.7,
         adjustments={"price_weight_delta": -0.03},
     )
-    assert explanation["summary"] == (
-        "LLM adjustments applied (trust 0.81 ≥ threshold 0.7)"
-    )
+    assert explanation["summary"] == ("LLM adjustments applied (trust 0.81 ≥ threshold 0.7)")
 
 
 # --- Rejected case ---
@@ -61,9 +58,7 @@ def test_explanation_rejected_summary_format() -> None:
         threshold=0.7,
         adjustments={},
     )
-    assert explanation["summary"] == (
-        "LLM adjustments rejected (trust 0.57 < threshold 0.7)"
-    )
+    assert explanation["summary"] == ("LLM adjustments rejected (trust 0.57 < threshold 0.7)")
 
 
 # --- Boundary case ---

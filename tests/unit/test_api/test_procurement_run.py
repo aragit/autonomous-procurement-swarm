@@ -21,22 +21,30 @@ def client() -> TestClient:
 class TestTraceIdGeneration:
     def test_deterministic_same_input(self) -> None:
         p1 = RequirementPayload(
-            material="steel", quantity=1000, budget=2000000.0,
+            material="steel",
+            quantity=1000,
+            budget=2000000.0,
             target_lead_time_days=30,
         )
         p2 = RequirementPayload(
-            material="steel", quantity=1000, budget=2000000.0,
+            material="steel",
+            quantity=1000,
+            budget=2000000.0,
             target_lead_time_days=30,
         )
         assert generate_trace_id(p1) == generate_trace_id(p2)
 
     def test_different_input(self) -> None:
         p1 = RequirementPayload(
-            material="steel", quantity=1000, budget=2000000.0,
+            material="steel",
+            quantity=1000,
+            budget=2000000.0,
             target_lead_time_days=30,
         )
         p2 = RequirementPayload(
-            material="aluminum", quantity=1000, budget=2000000.0,
+            material="aluminum",
+            quantity=1000,
+            budget=2000000.0,
             target_lead_time_days=30,
         )
         assert generate_trace_id(p1) != generate_trace_id(p2)
@@ -44,14 +52,17 @@ class TestTraceIdGeneration:
 
 class TestProcurementRunEndpoint:
     def test_happy_path(self, client: TestClient) -> None:
-        response = client.post("/procurement/run", json={
-            "requirement": {
-                "material": "aluminum",
-                "quantity": 1000,
-                "budget": 2000000.0,
-                "target_lead_time_days": 30,
-            }
-        })
+        response = client.post(
+            "/procurement/run",
+            json={
+                "requirement": {
+                    "material": "aluminum",
+                    "quantity": 1000,
+                    "budget": 2000000.0,
+                    "target_lead_time_days": 30,
+                }
+            },
+        )
         assert response.status_code == 200
         data = response.json()
         assert "result" in data
@@ -90,14 +101,17 @@ class TestProcurementRunEndpoint:
 
     def test_no_llm_usage_fallback_reflected(self, client: TestClient) -> None:
         """LLM context is recorded but first-round stability=0 so fallback fires."""
-        response = client.post("/procurement/run", json={
-            "requirement": {
-                "material": "aluminum",
-                "quantity": 1000,
-                "budget": 2000000.0,
-                "target_lead_time_days": 30,
-            }
-        })
+        response = client.post(
+            "/procurement/run",
+            json={
+                "requirement": {
+                    "material": "aluminum",
+                    "quantity": 1000,
+                    "budget": 2000000.0,
+                    "target_lead_time_days": 30,
+                }
+            },
+        )
         data = response.json()
         # The SupplierAnalysisLLMAgent runs on QuotesCompleted and creates
         # completions, but first-round stability is 0 (no prior history),
@@ -106,14 +120,17 @@ class TestProcurementRunEndpoint:
         assert data["llm"]["reason"] in ("no_llm_data", "low_stability")
 
     def test_metrics_present(self, client: TestClient) -> None:
-        response = client.post("/procurement/run", json={
-            "requirement": {
-                "material": "aluminum",
-                "quantity": 1000,
-                "budget": 2000000.0,
-                "target_lead_time_days": 30,
-            }
-        })
+        response = client.post(
+            "/procurement/run",
+            json={
+                "requirement": {
+                    "material": "aluminum",
+                    "quantity": 1000,
+                    "budget": 2000000.0,
+                    "target_lead_time_days": 30,
+                }
+            },
+        )
         data = response.json()
         metrics = data["llm"]["metrics"]
         assert "acceptance_rate" in metrics
@@ -124,11 +141,15 @@ class TestProcurementRunEndpoint:
 
     def test_trace_id_uniqueness(self) -> None:
         p1 = RequirementPayload(
-            material="steel", quantity=1000, budget=1000.0,
+            material="steel",
+            quantity=1000,
+            budget=1000.0,
             target_lead_time_days=30,
         )
         p2 = RequirementPayload(
-            material="steel", quantity=2000, budget=1000.0,
+            material="steel",
+            quantity=2000,
+            budget=1000.0,
             target_lead_time_days=30,
         )
         assert generate_trace_id(p1) != generate_trace_id(p2)
@@ -139,11 +160,14 @@ class TestProcurementRunEndpoint:
         assert data["error"] == "invalid_requirement"
 
     def test_error_invalid_schema(self, client: TestClient) -> None:
-        response = client.post("/procurement/run", json={
-            "requirement": {
-                "material": "",
-                "quantity": -1,
-            }
-        })
+        response = client.post(
+            "/procurement/run",
+            json={
+                "requirement": {
+                    "material": "",
+                    "quantity": -1,
+                }
+            },
+        )
         data = response.json()
         assert data["error"] == "invalid_requirement"

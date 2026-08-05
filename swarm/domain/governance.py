@@ -115,10 +115,7 @@ class GovernanceDecision(BaseModel):
 
         needs_approval = (
             risk.purchase_amount > policy.requires_approval_above_amount
-            or (
-                policy.requires_approval_for_high_risk
-                and risk.risk_level == RiskLevel.HIGH
-            )
+            or (policy.requires_approval_for_high_risk and risk.risk_level == RiskLevel.HIGH)
             or risk.risk_level == RiskLevel.MEDIUM
         )
         if needs_approval:

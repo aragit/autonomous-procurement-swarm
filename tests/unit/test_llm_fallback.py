@@ -11,8 +11,10 @@ Evaluation order (first failing condition wins):
   5. All pass → accepted
 """
 
+import pytest
+
+from swarm import config
 from swarm.utils.llm_fallback import evaluate_llm_usage
-from swarm.utils.llm_stability import TRUST_THRESHOLD
 
 
 class TestNoLLMData:
@@ -22,7 +24,6 @@ class TestNoLLMData:
             confidence=0.95,
             stability=0.95,
             trust=0.90,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["use_llm"] is False
         assert result["reason"] == "no_llm_data"
@@ -34,7 +35,6 @@ class TestNoLLMData:
             confidence=1.0,
             stability=1.0,
             trust=1.0,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["use_llm"] is False
         assert result["reason"] == "no_llm_data"
@@ -47,7 +47,6 @@ class TestLowConfidence:
             confidence=0.5,
             stability=0.95,
             trust=0.475,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["use_llm"] is False
         assert result["reason"] == "low_confidence"
@@ -59,7 +58,6 @@ class TestLowConfidence:
             confidence=0.5,
             stability=0.3,
             trust=0.15,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["reason"] == "low_confidence"
 
@@ -69,9 +67,8 @@ class TestLowStability:
         result = evaluate_llm_usage(
             has_completions=True,
             confidence=0.95,
-            stability=0.5,
-            trust=0.475,
-            threshold=TRUST_THRESHOLD,
+            stability=0.4,
+            trust=0.4,
         )
         assert result["use_llm"] is False
         assert result["reason"] == "low_stability"
@@ -81,21 +78,20 @@ class TestLowStability:
         result = evaluate_llm_usage(
             has_completions=True,
             confidence=0.95,
-            stability=0.5,
+            stability=0.4,
             trust=0.4,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["reason"] == "low_stability"
 
 
 class TestLowTrust:
-    def test_trust_below_threshold_returns_low_trust(self) -> None:
+    def test_trust_below_threshold_returns_low_trust(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("swarm.utils.llm_fallback.TRUST_THRESHOLD", 0.8)
         result = evaluate_llm_usage(
             has_completions=True,
             confidence=0.95,
             stability=0.80,
             trust=0.76,
-            threshold=0.8,
         )
         assert result["use_llm"] is False
         assert result["reason"] == "low_trust"
@@ -107,7 +103,6 @@ class TestLowTrust:
             confidence=0.9,
             stability=0.75,
             trust=0.675,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["use_llm"] is False
         assert result["reason"] == "low_trust"
@@ -120,7 +115,6 @@ class TestAccepted:
             confidence=0.95,
             stability=0.95,
             trust=0.90,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["use_llm"] is True
         assert result["reason"] == "accepted"
@@ -129,10 +123,9 @@ class TestAccepted:
         """All values exactly at threshold → accepted (boundary)."""
         result = evaluate_llm_usage(
             has_completions=True,
-            confidence=TRUST_THRESHOLD,
-            stability=TRUST_THRESHOLD,
-            trust=TRUST_THRESHOLD,
-            threshold=TRUST_THRESHOLD,
+            confidence=config.TRUST_THRESHOLD,
+            stability=config.TRUST_THRESHOLD,
+            trust=config.TRUST_THRESHOLD,
         )
         assert result["use_llm"] is True
         assert result["reason"] == "accepted"
@@ -143,10 +136,9 @@ class TestBoundaryCases:
         """Confidence exactly at threshold → not low_confidence."""
         result = evaluate_llm_usage(
             has_completions=True,
-            confidence=TRUST_THRESHOLD,
+            confidence=config.TRUST_THRESHOLD,
             stability=1.0,
             trust=0.7,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["reason"] != "low_confidence"
 
@@ -155,9 +147,8 @@ class TestBoundaryCases:
         result = evaluate_llm_usage(
             has_completions=True,
             confidence=1.0,
-            stability=TRUST_THRESHOLD,
+            stability=config.TRUST_THRESHOLD,
             trust=0.7,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["reason"] != "low_stability"
 
@@ -167,8 +158,7 @@ class TestBoundaryCases:
             has_completions=True,
             confidence=1.0,
             stability=1.0,
-            trust=TRUST_THRESHOLD,
-            threshold=TRUST_THRESHOLD,
+            trust=config.TRUST_THRESHOLD,
         )
         assert result["reason"] == "accepted"
 
@@ -180,14 +170,12 @@ class TestDeterminism:
             confidence=0.95,
             stability=0.85,
             trust=0.81,
-            threshold=TRUST_THRESHOLD,
         )
         e2 = evaluate_llm_usage(
             has_completions=True,
             confidence=0.95,
             stability=0.85,
             trust=0.81,
-            threshold=TRUST_THRESHOLD,
         )
         assert e1 == e2
 
@@ -197,7 +185,6 @@ class TestDeterminism:
             confidence=0.95,
             stability=0.85,
             trust=0.81,
-            threshold=TRUST_THRESHOLD,
         )
         assert "use_llm" in result
         assert "reason" in result
@@ -213,7 +200,6 @@ class TestPriorityOrder:
             confidence=0.5,
             stability=0.95,
             trust=0.475,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["reason"] == "no_llm_data"
 
@@ -223,7 +209,6 @@ class TestPriorityOrder:
             confidence=0.5,
             stability=0.3,
             trust=0.15,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["reason"] == "low_confidence"
 
@@ -233,7 +218,6 @@ class TestPriorityOrder:
             confidence=0.95,
             stability=0.3,
             trust=0.285,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["reason"] == "low_stability"
 
@@ -246,44 +230,92 @@ class TestEdgeCases:
             confidence=0.0,
             stability=0.0,
             trust=0.0,
-            threshold=TRUST_THRESHOLD,
         )
         assert result["reason"] == "low_confidence"
 
-    def test_negative_threshold_all_rejected(self) -> None:
-        """With threshold=0, only trust=0 fails (0 >= 0 is True)."""
-        # confidence=0, threshold=0 → 0 < 0 is False, so not low_confidence
-        # stability=0, threshold=0 → 0 < 0 is False, so not low_stability
-        # trust=0, threshold=0 → 0 < 0 is False, so not low_trust
-        # → accepted
-        result = evaluate_llm_usage(
-            has_completions=True,
-            confidence=0.0,
-            stability=0.0,
-            trust=0.0,
-            threshold=0.0,
-        )
-        assert result["use_llm"] is True
-        assert result["reason"] == "accepted"
-
-    def test_custom_threshold_respected(self) -> None:
+    def test_confidence_below_config_threshold_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When CONFIDENCE_THRESHOLD is raised, lower confidence is rejected."""
+        monkeypatch.setattr("swarm.utils.llm_fallback.CONFIDENCE_THRESHOLD", 0.9)
         result = evaluate_llm_usage(
             has_completions=True,
             confidence=0.8,
-            stability=0.9,
-            trust=0.72,
-            threshold=0.8,
+            stability=1.0,
+            trust=0.8,
         )
-        assert result["use_llm"] is False
-        assert result["reason"] == "low_trust"
+        assert result["reason"] == "low_confidence"
 
-    def test_higher_custom_threshold_accepted(self) -> None:
+    def test_stability_below_config_threshold_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When STABILITY_THRESHOLD is raised, lower stability is rejected."""
+        monkeypatch.setattr("swarm.utils.llm_fallback.STABILITY_THRESHOLD", 0.9)
+        result = evaluate_llm_usage(
+            has_completions=True,
+            confidence=1.0,
+            stability=0.8,
+            trust=0.8,
+        )
+        assert result["reason"] == "low_stability"
+
+    def test_trust_below_config_threshold_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When TRUST_THRESHOLD is raised, lower trust is rejected."""
+        monkeypatch.setattr("swarm.utils.llm_fallback.TRUST_THRESHOLD", 0.9)
         result = evaluate_llm_usage(
             has_completions=True,
             confidence=1.0,
             stability=1.0,
-            trust=1.0,
-            threshold=0.5,
+            trust=0.8,
         )
-        assert result["use_llm"] is True
+        assert result["reason"] == "low_trust"
+
+
+class TestBehaviorChangesWithConfig:
+    def test_raising_confidence_threshold_rejects_previously_valid(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("swarm.utils.llm_fallback.CONFIDENCE_THRESHOLD", 0.99)
+        result = evaluate_llm_usage(
+            has_completions=True,
+            confidence=0.95,
+            stability=1.0,
+            trust=0.95,
+        )
+        assert result["reason"] == "low_confidence"
+
+    def test_lowering_confidence_threshold_accepts_previously_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("swarm.utils.llm_fallback.CONFIDENCE_THRESHOLD", 0.4)
+        result = evaluate_llm_usage(
+            has_completions=True,
+            confidence=0.5,
+            stability=1.0,
+            trust=0.8,
+        )
         assert result["reason"] == "accepted"
+
+    def test_raising_trust_threshold_rejects_previously_valid(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("swarm.utils.llm_fallback.TRUST_THRESHOLD", 0.99)
+        result = evaluate_llm_usage(
+            has_completions=True,
+            confidence=1.0,
+            stability=1.0,
+            trust=0.95,
+        )
+        assert result["reason"] == "low_trust"
+
+    def test_raising_stability_threshold_rejects_previously_valid(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("swarm.utils.llm_fallback.STABILITY_THRESHOLD", 0.99)
+        result = evaluate_llm_usage(
+            has_completions=True,
+            confidence=1.0,
+            stability=0.95,
+            trust=0.95,
+        )
+        assert result["reason"] == "low_stability"

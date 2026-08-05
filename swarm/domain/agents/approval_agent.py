@@ -148,9 +148,7 @@ class ApprovalAgent(BaseAgent):
         self._pending = False
         self._decision_payload = None
 
-    def approve(
-        self, state: SwarmState, *, approver: str = SIMULATED_APPROVER
-    ) -> Artifact | None:
+    def approve(self, state: SwarmState, *, approver: str = SIMULATED_APPROVER) -> Artifact | None:
         """Resolve a *pending* authorization (deterministic simulated approval).
 
         Used by the ``POST /swarm/{request_id}/approve`` endpoint against a

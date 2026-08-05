@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from swarm.config import CONFIDENCE_DROP_THRESHOLD
 from swarm.utils.llm_stability import STABILITY_THRESHOLD, TRUST_THRESHOLD
 
 
@@ -35,10 +36,8 @@ def detect_drift(
     if len(history) >= 2:
         prev = history[-2]
         conf_drop = prev.get("confidence", 0.0) - latest.get("confidence", 0.0)
-        if conf_drop > 0.15:
-            reasons.append(
-                f"confidence_drop:{round(conf_drop, 4)}"
-            )
+        if conf_drop > CONFIDENCE_DROP_THRESHOLD:
+            reasons.append(f"confidence_drop:{round(conf_drop, 4)}")
 
     latest_stability = latest.get("stability", 0.0)
     if latest_stability < STABILITY_THRESHOLD:

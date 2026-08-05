@@ -121,9 +121,7 @@ class PurchaseOrder:
         constraints = requirement_artifact.data.get("constraints", {})
         material = str(constraints.get("material", ""))
         quantity = int(constraints.get("quantity", 0))
-        quote_data: dict[str, Any] = (
-            quote_artifact.data if quote_artifact is not None else {}
-        )
+        quote_data: dict[str, Any] = quote_artifact.data if quote_artifact is not None else {}
         unit_price = float(quote_data.get("price", 0.0))
         currency = str(quote_data.get("currency", "USD"))
         total_amount = unit_price * quantity

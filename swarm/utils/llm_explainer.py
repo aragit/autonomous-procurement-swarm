@@ -39,16 +39,10 @@ def build_llm_explanation(
 
     if trust >= threshold:
         decision = "accepted"
-        summary = (
-            f"LLM adjustments applied "
-            f"(trust {trust:.2f} ≥ threshold {threshold:.1f})"
-        )
+        summary = f"LLM adjustments applied (trust {trust:.2f} ≥ threshold {threshold:.1f})"
     else:
         decision = "rejected"
-        summary = (
-            f"LLM adjustments rejected "
-            f"(trust {trust:.2f} < threshold {threshold:.1f})"
-        )
+        summary = f"LLM adjustments rejected (trust {trust:.2f} < threshold {threshold:.1f})"
 
     return {
         "decision": decision,

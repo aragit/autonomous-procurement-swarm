@@ -94,10 +94,7 @@ async def scores_under(strategy_name: str) -> dict[str, float]:
                 correlation_id="REQ-CONV",
             ),
         )
-    return {
-        e.data["supplier_id"]: e.data["score"]
-        for e in state.find_artifacts(kind="evaluation")
-    }
+    return {e.data["supplier_id"]: e.data["score"] for e in state.find_artifacts(kind="evaluation")}
 
 
 @pytest.mark.asyncio
