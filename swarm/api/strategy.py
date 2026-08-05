@@ -11,8 +11,11 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 
+from swarm.config import ENABLE_LEARNING
 from swarm.core.state import SwarmState
-from swarm.storage.event_store import load_state
+from swarm.learning.adaptive_policy import get_adaptive_thresholds
+from swarm.learning.signals import compute_learning_signals
+from swarm.storage.event_store import load_full_trace
 from swarm.utils.llm_drift import detect_drift
 from swarm.utils.llm_explain import aggregate_explanations
 from swarm.utils.llm_memory import get_llm_consensus_history
@@ -22,6 +25,15 @@ app = FastAPI(title="Autonomous Procurement Swarm — LLM Observability")
 
 _state: SwarmState | None = None
 _state_provider: Callable[[str], SwarmState | None] | None = None
+
+
+def _zero_learning_signals() -> dict[str, float]:
+    return {
+        "confidence_vs_outcome_gap": 0.0,
+        "stability_vs_success": 0.0,
+        "trust_vs_outcome": 0.0,
+        "drift_impact": 0.0,
+    }
 
 
 def set_state(state: SwarmState) -> None:
@@ -64,35 +76,47 @@ def get_state(trace_id: str) -> SwarmState | None:
 def build_dashboard(trace_id: str) -> dict[str, Any]:
     """Aggregate the complete LLM decision context for a given trace ID.
 
-    Consolidates metrics, drift detection, explanation, and history into
-    a single deterministic response by reusing existing utilities.
+    Consolidates metrics, drift detection, explanation, history, feedback,
+    and learning signals into a single deterministic response by reusing
+    existing utilities.
 
     Tries in-memory state first (via ``get_state``), then falls back to
-    the persistent event store (``load_state``) for durable, replayable
-    data.
+    the persistent event store (``load_full_trace``) for durable,
+    replayable data.
 
     Args:
         trace_id: The trace/correlation ID to look up.
 
     Returns:
         A dict with ``trace_id``, ``summary``, ``decision``, ``metrics``,
-        ``drift``, and ``history`` fields. If no state is found, returns
-        ``{"error": "trace_not_found"}``.
+        ``drift``, ``history``, ``feedback``, and ``learning_signals``
+        fields. If no state is found, returns ``{"error": "trace_not_found"}``.
     """
     # Try in-memory state first, then fall back to DB-backed state
     state = get_state(trace_id)
     db_state: dict[str, Any] | None = None
+    full_trace: dict[str, Any] | None = None
     if state is not None:
         history = get_llm_consensus_history(state, correlation_id=trace_id)
     else:
-        db_state = load_state(trace_id)
-        history = db_state["llm_history"]
+        full_trace = load_full_trace(trace_id)
+        db_state = {
+            "events": full_trace["events"],
+            "artifacts": full_trace["artifacts"],
+            "llm_history": full_trace["llm_history"],
+        }
+        history = full_trace["llm_history"]
         # If DB has no data either, the trace doesn't exist
         if not db_state.get("events") and not db_state.get("artifacts") and not history:
             return {"error": "trace_not_found"}
 
     metrics = compute_llm_metrics(history)
-    drift_detected, drift_reasons = detect_drift(history)
+    thresholds = get_adaptive_thresholds()
+    drift_detected, drift_reasons = detect_drift(
+        history,
+        stability_threshold=thresholds["stability_threshold"],
+        trust_threshold=thresholds["trust_threshold"],
+    )
 
     last = history[-1] if history else {}
     decision: dict[str, Any] = {
@@ -100,7 +124,12 @@ def build_dashboard(trace_id: str) -> dict[str, Any]:
         "reason": last.get("decision_reason", "no_data"),
     }
 
-    explain = aggregate_explanations(history, current_decision=decision)
+    explain = aggregate_explanations(
+        history,
+        current_decision=decision,
+        stability_threshold=thresholds["stability_threshold"],
+        trust_threshold=thresholds["trust_threshold"],
+    )
 
     formatted_history: list[dict[str, Any]] = [
         {
@@ -123,6 +152,21 @@ def build_dashboard(trace_id: str) -> dict[str, Any]:
             "reasons": drift_reasons,
         },
         "history": formatted_history,
+        "feedback": full_trace.get("feedback") if full_trace else None,
+        "learning_signals": compute_learning_signals(full_trace)
+        if full_trace
+        else _zero_learning_signals(),
+        "adaptive": {
+            "enabled": ENABLE_LEARNING,
+            "thresholds": {
+                "confidence": thresholds["confidence_threshold"],
+                "stability": thresholds["stability_threshold"],
+                "trust": thresholds["trust_threshold"],
+            },
+        },
+        "replay": {
+            "available": full_trace is not None and bool(full_trace.get("events")),
+        },
     }
 
 

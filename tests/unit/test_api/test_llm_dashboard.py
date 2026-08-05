@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from swarm.api.strategy import app, build_dashboard, set_state, set_state_provider
+from swarm.config import CONFIDENCE_THRESHOLD
 from swarm.core.state import SwarmState
 from swarm.utils.llm_memory import record_llm_consensus
 
@@ -61,6 +62,9 @@ class TestDashboardFullResponse:
         assert "metrics" in data
         assert "drift" in data
         assert "history" in data
+        assert "adaptive" in data
+        assert "thresholds" in data["adaptive"]
+        assert data["adaptive"]["thresholds"]["confidence"] == CONFIDENCE_THRESHOLD
 
     def test_decision_structure(self, client: TestClient) -> None:
         s = SwarmState(request_id="DASH-DECISION", goal="strategy")
@@ -156,6 +160,9 @@ class TestDashboardEmptyHistory:
         assert data["history"] == []
         assert data["drift"]["drifting"] is False
         assert data["drift"]["reasons"] == []
+        assert "adaptive" in data
+        assert data["adaptive"]["enabled"] is True
+        assert "thresholds" in data["adaptive"]
 
     def test_build_dashboard_empty_history(self) -> None:
         s = SwarmState(request_id="DASH-FUNC-EMPTY", goal="strategy")

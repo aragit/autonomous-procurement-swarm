@@ -60,7 +60,6 @@ from typing import Any
 
 import structlog
 
-from swarm.config import TRUST_THRESHOLD
 from swarm.core.agent import BaseAgent
 from swarm.core.capability import Capability
 from swarm.core.event import Event
@@ -72,6 +71,7 @@ from swarm.domain.artifacts import (
 )
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.strategy import Strategy, select_strategy
+from swarm.learning.adaptive_policy import get_adaptive_thresholds
 from swarm.storage.event_store import store_llm_record
 from swarm.utils.llm_consensus import compute_llm_consensus
 from swarm.utils.llm_drift import detect_drift
@@ -155,13 +155,19 @@ class StrategyAgent(BaseAgent):
         constraints = requirement.data.get("constraints", {})
         self._strategy = select_strategy(constraints)
 
+        # Compute adaptive thresholds once for all threshold-dependent decisions
+        thresholds = get_adaptive_thresholds()
+
         # Advisory-only: read latest LLM completion output if one exists.
         # The strategy selection logic above is NOT affected by this.
         llm_output = get_latest_llm_completion(state, correlation_id=self._correlation_id)
         completions = get_all_llm_completions(state, correlation_id=self._correlation_id)
 
         # Compute consensus across all LLM completions (Step 5)
-        self._consensus = compute_llm_consensus(completions)
+        self._consensus = compute_llm_consensus(
+            completions,
+            confidence_threshold=thresholds["confidence_threshold"],
+        )
 
         if llm_output is not None:
             llm_risks = llm_output.get("risks", [])
@@ -198,6 +204,9 @@ class StrategyAgent(BaseAgent):
                 confidence=confidence,
                 stability=self._stability,
                 trust=self._trust_score,
+                confidence_threshold=thresholds["confidence_threshold"],
+                stability_threshold=thresholds["stability_threshold"],
+                trust_threshold=thresholds["trust_threshold"],
             )
 
             record_llm_consensus(
@@ -238,6 +247,9 @@ class StrategyAgent(BaseAgent):
                 confidence=self._consensus.get("confidence", 0.0),
                 stability=0.0,
                 trust=0.0,
+                confidence_threshold=thresholds["confidence_threshold"],
+                stability_threshold=thresholds["stability_threshold"],
+                trust_threshold=thresholds["trust_threshold"],
             )
 
         # Step 9: The fallback decision was computed above alongside the
@@ -278,7 +290,7 @@ class StrategyAgent(BaseAgent):
             confidence=self._consensus.get("confidence", 0.0),
             stability=self._stability,
             trust=self._trust_score,
-            threshold=TRUST_THRESHOLD,
+            threshold=thresholds["trust_threshold"],
             adjustments=self._validated_adjustments,
         )
 
@@ -290,7 +302,11 @@ class StrategyAgent(BaseAgent):
                 correlation_id=self._correlation_id or "",
             )
             self._metrics = compute_llm_metrics(history)
-            self._drift_detected, _ = detect_drift(history)
+            self._drift_detected, _ = detect_drift(
+                history,
+                stability_threshold=thresholds["stability_threshold"],
+                trust_threshold=thresholds["trust_threshold"],
+            )
 
         logger.info(
             "strategy_selected",

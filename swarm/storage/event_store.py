@@ -9,6 +9,7 @@ Tables::
     events      — every Event dispatched during a trace
     artifacts   — every Artifact created during a trace
     llm_history — per-round LLM consensus records for drift/metrics
+    feedback    — outcome / user feedback linked to a trace
 
 The store is keyed by ``trace_id`` (the correlation identifier for
 an entire procurement run).  Within a trace, ``correlation_id``
@@ -83,6 +84,16 @@ def init_db(db_path: str | None = None) -> None:
                 trust REAL,
                 decision_reason TEXT,
                 payload TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT NOT NULL,
+                outcome_score REAL,
+                success BOOLEAN,
+                latency_ms REAL,
+                user_feedback TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """
@@ -224,5 +235,146 @@ def load_state(trace_id: str) -> dict[str, Any]:
             "artifacts": artifacts,
             "llm_history": llm_history,
         }
+    finally:
+        conn.close()
+
+
+def store_feedback(
+    trace_id: str,
+    outcome_score: float,
+    success: bool,
+    latency_ms: float,
+    user_feedback: str | None = None,
+) -> None:
+    """Append a feedback row for the given trace.
+
+    Feedback is append-only: each call creates a new row.  If feedback
+    already exists for the trace, the latest row takes precedence
+    when read back via :func:`load_feedback`.
+
+    Args:
+        trace_id: The trace identifier.
+        outcome_score: Numerical outcome score (0.0–1.0).
+        success: Whether the procurement was successful.
+        latency_ms: Total execution latency in milliseconds.
+        user_feedback: Optional free-text feedback from the user.
+    """
+    init_db()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO feedback (trace_id, outcome_score, success, latency_ms, user_feedback) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                trace_id,
+                outcome_score,
+                1 if success else 0,
+                latency_ms,
+                user_feedback,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_feedback(trace_id: str) -> dict[str, Any] | None:
+    """Load the most recent feedback for a trace.
+
+    Returns ``None`` if no feedback exists.
+
+    Returns:
+        A dict with ``outcome_score``, ``success``, ``latency_ms``,
+        and ``user_feedback`` keys, or ``None``.
+    """
+    init_db()
+    conn = _get_conn()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT outcome_score, success, latency_ms, user_feedback "
+            "FROM feedback WHERE trace_id = ? ORDER BY id DESC LIMIT 1",
+            (trace_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "outcome_score": row["outcome_score"],
+            "success": bool(row["success"]),
+            "latency_ms": row["latency_ms"],
+            "user_feedback": row["user_feedback"],
+        }
+    finally:
+        conn.close()
+
+
+def load_full_trace(trace_id: str) -> dict[str, Any]:
+    """Reconstruct the complete persisted state for a given trace.
+
+    Combines events, artifacts, LLM history, and feedback into a single
+    dict.  This is the canonical snapshot used by the learning layer.
+
+    Returns:
+        A dict with keys ``events``, ``artifacts``, ``llm_history``,
+        and ``feedback``.  ``feedback`` is ``None`` when no feedback
+        has been recorded.
+    """
+    base = load_state(trace_id)
+    feedback = load_feedback(trace_id)
+    return {
+        "events": base["events"],
+        "artifacts": base["artifacts"],
+        "llm_history": base["llm_history"],
+        "feedback": feedback,
+    }
+
+
+def load_all_feedback() -> list[dict[str, Any]]:
+    """Load all feedback rows, sorted by creation time (oldest first).
+
+    Used by the adaptive policy engine to compute threshold adjustments
+    from the full feedback history.
+
+    Returns:
+        A list of dicts, each with ``trace_id``, ``outcome_score``,
+        ``success``, ``latency_ms``, ``user_feedback``, and ``created_at``.
+    """
+    init_db()
+    conn = _get_conn()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT trace_id, outcome_score, success, latency_ms, user_feedback, created_at "
+            "FROM feedback ORDER BY created_at ASC, id ASC"
+        ).fetchall()
+        return [
+            {
+                "trace_id": row["trace_id"],
+                "outcome_score": row["outcome_score"],
+                "success": bool(row["success"]),
+                "latency_ms": row["latency_ms"],
+                "user_feedback": row["user_feedback"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+def load_recent_trace_ids(limit: int = 100) -> list[str]:
+    """Return the most recent ``limit`` trace IDs that have persisted events.
+
+    Ordered by insertion (newest first) so the simulation engine can replay
+    the latest executions. Traces with no persisted events are excluded.
+    """
+    init_db()
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT trace_id FROM events GROUP BY trace_id ORDER BY MAX(id) DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [row[0] for row in rows]
     finally:
         conn.close()

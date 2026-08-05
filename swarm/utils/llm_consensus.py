@@ -26,12 +26,18 @@ _CONSENSUS_FIELDS = frozenset({"price_weight_delta", "delivery_weight_delta"})
 #: Minimum confidence for adjustments to be aggregated (vs. discarded).
 
 
-def compute_llm_consensus(completions: list[dict[str, Any]]) -> dict[str, Any]:
+def compute_llm_consensus(
+    completions: list[dict[str, Any]],
+    confidence_threshold: float | None = None,
+) -> dict[str, Any]:
     """Compute consensus and confidence from N LLM completion outputs.
 
     Args:
         completions: List of LLM output dicts (each typically has
             ``suggested_adjustments``).
+        confidence_threshold: Optional adaptive threshold override for
+            accepting aggregated adjustments.  Defaults to
+            ``CONFIDENCE_THRESHOLD``.
 
     Returns:
         A dict with:
@@ -104,8 +110,9 @@ def compute_llm_consensus(completions: list[dict[str, Any]]) -> dict[str, Any]:
     confidence = agreement_score * completeness
 
     # --- Step E: aggregate (mean) if confidence is high enough ---
+    conf_thr = confidence_threshold if confidence_threshold is not None else CONFIDENCE_THRESHOLD
     aggregated: dict[str, float] = {}
-    if confidence >= CONFIDENCE_THRESHOLD:
+    if confidence >= conf_thr:
         for field in all_fields:
             values = field_values.get(field, [])
             if values:

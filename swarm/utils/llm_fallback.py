@@ -29,6 +29,9 @@ def evaluate_llm_usage(
     confidence: float,
     stability: float,
     trust: float,
+    confidence_threshold: float | None = None,
+    stability_threshold: float | None = None,
+    trust_threshold: float | None = None,
 ) -> dict[str, Any]:
     """Evaluate whether LLM influence should be used, with a deterministic reason.
 
@@ -41,6 +44,12 @@ def evaluate_llm_usage(
         confidence: The consensus confidence score (0 → 1).
         stability: The temporal stability score (0 → 1).
         trust: The computed trust score = confidence × stability.
+        confidence_threshold: Optional adaptive threshold override.
+            Defaults to ``CONFIDENCE_THRESHOLD``.
+        stability_threshold: Optional adaptive threshold override.
+            Defaults to ``STABILITY_THRESHOLD``.
+        trust_threshold: Optional adaptive threshold override.
+            Defaults to ``TRUST_THRESHOLD``.
 
     Returns:
         A dict with ``use_llm`` (bool) and ``reason`` (str).
@@ -48,13 +57,17 @@ def evaluate_llm_usage(
     if not has_completions:
         return {"use_llm": False, "reason": "no_llm_data"}
 
-    if confidence < CONFIDENCE_THRESHOLD:
+    conf_thr = confidence_threshold if confidence_threshold is not None else CONFIDENCE_THRESHOLD
+    stab_thr = stability_threshold if stability_threshold is not None else STABILITY_THRESHOLD
+    trust_thr = trust_threshold if trust_threshold is not None else TRUST_THRESHOLD
+
+    if confidence < conf_thr:
         return {"use_llm": False, "reason": "low_confidence"}
 
-    if stability < STABILITY_THRESHOLD:
+    if stability < stab_thr:
         return {"use_llm": False, "reason": "low_stability"}
 
-    if trust < TRUST_THRESHOLD:
+    if trust < trust_thr:
         return {"use_llm": False, "reason": "low_trust"}
 
     return {"use_llm": True, "reason": "accepted"}

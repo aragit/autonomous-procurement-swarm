@@ -126,6 +126,10 @@ set_state_provider(_lookup_swarm_state_by_correlation_id)
 from swarm.api.procurement import router as _procurement_router
 app.include_router(_procurement_router)
 
+# Mount the deterministic replay / simulation endpoints
+from swarm.api.simulation import router as _simulation_router
+app.include_router(_simulation_router)
+
 
 class AuctionRequest(BaseModel):
     material: str = "steel"

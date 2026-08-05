@@ -48,6 +48,7 @@ class TestInitDb:
         assert "events" in tables
         assert "artifacts" in tables
         assert "llm_history" in tables
+        assert "feedback" in tables
         conn.close()
 
     def test_init_db_idempotent(self, db_path: str) -> None:
@@ -61,7 +62,7 @@ class TestInitDb:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
         }
-        assert tables == {"events", "artifacts", "llm_history"}
+        assert tables == {"events", "artifacts", "llm_history", "feedback"}
         conn.close()
 
 

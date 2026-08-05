@@ -234,6 +234,8 @@ class TestDashboardDbBacked:
         assert "metrics" in dash_data
         assert "drift" in dash_data
         assert "history" in dash_data
+        assert "feedback" in dash_data
+        assert "learning_signals" in dash_data
 
         # Metrics should match what was returned by the procurement endpoint
         assert dash_data["metrics"] == run_data["llm"]["metrics"]

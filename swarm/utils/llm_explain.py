@@ -15,6 +15,8 @@ from swarm.utils.llm_drift import detect_drift
 def aggregate_explanations(
     history: list[dict[str, Any]],
     current_decision: dict[str, Any] | None = None,
+    stability_threshold: float | None = None,
+    trust_threshold: float | None = None,
 ) -> dict[str, Any]:
     """Build an aggregated explanation across all consensus rounds.
 
@@ -22,6 +24,8 @@ def aggregate_explanations(
         history: Full consensus history (from ``get_llm_consensus_history``).
         current_decision: The explanation dict from ``build_llm_explanation``
             for the current round, or ``None`` if no LLM context was used.
+        stability_threshold: Optional adaptive threshold override for drift detection.
+        trust_threshold: Optional adaptive threshold override for drift detection.
 
     Returns:
         A dict with:
@@ -69,7 +73,11 @@ def aggregate_explanations(
         trusts.append(trust)
 
     total = len(history)
-    drift_detected, drift_reasons = detect_drift(history)
+    drift_detected, drift_reasons = detect_drift(
+        history,
+        stability_threshold=stability_threshold,
+        trust_threshold=trust_threshold,
+    )
 
     summary_parts = [
         f"{total} rounds",

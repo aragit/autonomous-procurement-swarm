@@ -55,3 +55,13 @@ POLICY_DELIVERY_MIN: float = _get_float("SWARM_POLICY_DELIVERY_MIN", 0.3)
 
 # Persistent event store
 DB_PATH: str = os.getenv("SWARM_DB_PATH", "swarm.db")
+
+# Learning / feedback ingestion
+ENABLE_LEARNING: bool = _get_bool("SWARM_ENABLE_LEARNING", True)
+
+# Adaptive policy tuning
+ADAPTIVE_K: float = _get_float("ADAPTIVE_K", 0.2)
+MIN_FEEDBACK_SAMPLES: int = _get_int("MIN_FEEDBACK_SAMPLES", 5)
+
+# Simulation / replay
+SIMULATION_LIMIT: int = _get_int("SIMULATION_LIMIT", 100)
