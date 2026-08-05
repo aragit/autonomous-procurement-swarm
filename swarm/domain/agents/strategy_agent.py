@@ -72,6 +72,7 @@ from swarm.domain.artifacts import (
 )
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.strategy import Strategy, select_strategy
+from swarm.storage.event_store import store_llm_record
 from swarm.utils.llm_consensus import compute_llm_consensus
 from swarm.utils.llm_drift import detect_drift
 from swarm.utils.llm_explainer import build_llm_explanation
@@ -215,6 +216,18 @@ class StrategyAgent(BaseAgent):
                     )
                 ],
                 by=self.name,
+            )
+
+            store_llm_record(
+                state.request_id,
+                {
+                    "round": round_number,
+                    "confidence": confidence,
+                    "stability": self._stability,
+                    "trust": self._trust_score,
+                    "decision_reason": self._llm_decision.get("reason", "accepted"),
+                    "payload": self._consensus,
+                },
             )
         else:
             self._history_depth = 0

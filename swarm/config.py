@@ -52,3 +52,6 @@ API_RELOAD: bool = _get_bool("SWARM_API_RELOAD", False)
 # Policy constraints (hard bounds on strategy weights)
 POLICY_PRICE_MAX: float = _get_float("SWARM_POLICY_PRICE_MAX", 0.7)
 POLICY_DELIVERY_MIN: float = _get_float("SWARM_POLICY_DELIVERY_MIN", 0.3)
+
+# Persistent event store
+DB_PATH: str = os.getenv("SWARM_DB_PATH", "swarm.db")

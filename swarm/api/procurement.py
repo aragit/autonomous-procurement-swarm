@@ -3,6 +3,10 @@
 Exposes ``POST /procurement/run`` — a deterministic end-to-end endpoint that
 runs the full procurement swarm and returns the result plus the complete LLM
 observability context (metrics, drift, explanation).
+
+After execution, all events, artifacts, and LLM history are persisted to
+the event store (``swarm.storage.event_store``) so the dashboard can be
+served from the database rather than in-memory state.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from swarm import Swarm
 from swarm.core.state import SwarmState
 from swarm.domain.events import CREATE_REQUIREMENT_INTENT
 from swarm.domain.wiring import build_procurement_swarm
+from swarm.storage.event_store import store_artifact, store_event
 from swarm.utils.llm_drift import detect_drift
 from swarm.utils.llm_explain import aggregate_explanations
 from swarm.utils.llm_memory import get_llm_consensus_history
@@ -135,9 +140,23 @@ async def run_procurement(
     strategy = get_strategy(state)
     result = get_selected_supplier(state)
 
-    # Extract LLM observability
+    # Persist to event store for durable, replayable state
     correlation_id = f"{trace_id}-CONV"
+
+    for event in state.events:
+        store_event(trace_id, event.type, event.payload or {})
+
+    strategy_artifact = state.get_artifact("strategy")
+    if strategy_artifact is not None:
+        store_artifact(trace_id, "strategy", strategy_artifact.data)
+
+    decision_artifact = state.get_artifact("decision")
+    if decision_artifact is not None:
+        store_artifact(trace_id, "result", decision_artifact.data)
+
+    # Extract LLM observability
     history = get_llm_consensus_history(state, correlation_id=correlation_id)
+
     metrics = compute_llm_metrics(history)
 
     drift_detected, drift_reasons = detect_drift(history)

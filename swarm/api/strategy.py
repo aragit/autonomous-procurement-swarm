@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 
 from swarm.core.state import SwarmState
+from swarm.storage.event_store import load_state
 from swarm.utils.llm_drift import detect_drift
 from swarm.utils.llm_explain import aggregate_explanations
 from swarm.utils.llm_memory import get_llm_consensus_history
@@ -66,6 +67,10 @@ def build_dashboard(trace_id: str) -> dict[str, Any]:
     Consolidates metrics, drift detection, explanation, and history into
     a single deterministic response by reusing existing utilities.
 
+    Tries in-memory state first (via ``get_state``), then falls back to
+    the persistent event store (``load_state``) for durable, replayable
+    data.
+
     Args:
         trace_id: The trace/correlation ID to look up.
 
@@ -74,11 +79,17 @@ def build_dashboard(trace_id: str) -> dict[str, Any]:
         ``drift``, and ``history`` fields. If no state is found, returns
         ``{"error": "trace_not_found"}``.
     """
+    # Try in-memory state first, then fall back to DB-backed state
     state = get_state(trace_id)
-    if state is None:
-        return {"error": "trace_not_found"}
-
-    history = get_llm_consensus_history(state, correlation_id=trace_id)
+    db_state: dict[str, Any] | None = None
+    if state is not None:
+        history = get_llm_consensus_history(state, correlation_id=trace_id)
+    else:
+        db_state = load_state(trace_id)
+        history = db_state["llm_history"]
+        # If DB has no data either, the trace doesn't exist
+        if not db_state.get("events") and not db_state.get("artifacts") and not history:
+            return {"error": "trace_not_found"}
 
     metrics = compute_llm_metrics(history)
     drift_detected, drift_reasons = detect_drift(history)
