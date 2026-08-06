@@ -1,6 +1,9 @@
 <p align="center">
   <h1 align="center">Autonomous Procurement Swarm</h1>
   <p align="center">
+    <img src="assets/logo_02.png" alt="Logo" width="200">
+  </p>
+  <p align="center">
     <b>Production-grade, deterministic multi-agent procurement</b><br>
     Cryptographic audit trails · Enterprise ERP integration · Zero-LLM governance · Offline policy learning
   </p>
@@ -152,51 +155,7 @@ Parameters can be contextually overridden at runtime by routing rules:
 
 ### Dual-Runtime Model
 
-```mermaid
-flowchart TB
-subgraph ControlPlane["FastAPI Control Plane"]
-  API["api.main:app"]
-  SWARM_API["swarm.api.*"]
-  LLM_OBS["/llm-obs (v0.9)"]
-end
-subgraph CoreEngine["Core Auction Engine (core/)"]
-  BUYER["BuyerOrchestrator"]
-  SUPPLIERS["SupplierAgent × N (LLM-powered)"]
-  POLICY["PolicyEngine"]
-  EVAL["MultiCriteriaEvaluator"]
-  ORCH["AuctionOrchestrator"]
-  LEDGER["PostgresLedgerRepository"]
-  MEM_HEUR["HeuristicReservationEstimator"]
-  MEM_VEC["PgVectorMemoryStore"]
-end
-subgraph SwarmRuntime["Deterministic Swarm Runtime (swarm/)"]
-  SWARM["Swarm Facade"]
-  BUS["EventBus"]
-  STATE["SwarmState (Artifacts + Events)"]
-  AGENTS["14 Domain Agents"]
-  TRACKER["CompletionTracker"]
-  TIMELINE["Timeline Projection"]
-end
-subgraph Enterprise["Enterprise Integration (swarm/integrations/)"]
-  FACTORY["ConnectorConfig + build_connector"]
-  MOCK["MockConnector"]
-  SAP["SAPConnector"]
-  ORACLE["OracleConnector"]
-  COUPA["CoupaConnector"]
-  IDEMP["IdempotencyGuard"]
-end
-
-API -->|POST /auctions| CoreEngine
-API -->|POST /swarm/requirements| SwarmRuntime
-API -->|GET /swarm/timeline| TIMELINE
-API -->|mount /llm-obs| LLM_OBS
-CoreEngine -->|hash-chained events| LEDGER
-CoreEngine -->|semantic memory| MEM_VEC
-CoreEngine -->|heuristic profiles| MEM_HEUR
-SwarmRuntime -->|idempotent external calls| Enterprise
-SwarmRuntime -->|read-only projection| TIMELINE
-Enterprise -->|ExternalCallArtifact| STATE
-```
+<img src="assets/d1.png" alt="Dual-Runtime Architecture" width="100%">
 
 **Key architectural note:** Strategy selection and parameter adaptation are now **dynamic** — the `StrategyAgent` resolves a context-aware strategy at runtime via `AdaptivePolicyEngine`, and evaluation thresholds/weights can be contextually overridden via `ContextualParameterAdapter`. The `ReplayEngine` (offline) uses the same deterministic logic to evaluate candidate policies before promotion.
 
@@ -204,33 +163,7 @@ Enterprise -->|ExternalCallArtifact| STATE
 
 The swarm runtime wires 14 specialized agents through a shared EventBus. Each agent implements `perceive → act` and publishes domain events. Agents are routed by event type and capability, not by direct reference.
 
-```mermaid
-flowchart LR
-USER["User / API"] -->|CreateRequirement| RA["RequirementAgent"]
-RA -->|RequirementCreated| ST["StrategyAgent"]
-ST -->|StrategySelected| SDA["SupplierDiscoveryAgent"]
-SDA -->|SupplierDiscovered × N| EA["EvaluationAgent"]
-EA -->|SupplierEvaluated × N| NA["NegotiationAgent"]
-NA -->|QuoteGenerated × N| CT["CompletionTracker"]
-CT -->|QuotesCompleted| DA["DecisionAgent"]
-DA -->|DecisionMade| CVA["ContractValidationAgent"]
-CVA -->|ContractValidated| RSA["RiskAssessmentAgent"]
-CVA -->|ContractRejected| GA["GovernanceAgent"]
-RSA -->|RiskAssessmentCompleted| GA
-GA -->|GovernanceDecisionMade| APA["ApprovalAgent"]
-APA -->|ApprovalGranted| POA["PurchaseOrderAgent"]
-POA -->|PurchaseOrderCreated| ETA["ExecutionTrackingAgent"]
-ETA -->|ExecutionStatusUpdated| OA["OutcomeAgent"]
-OA -->|OutcomeRecorded| SIA["SupplierIntelligenceAgent"]
-SIA -->|SupplierPerformanceUpdated| SM["SupplierMemoryStore"]
-SM -.->|history| EA
-DA -->|QuotesCompleted| LLMA["SupplierAnalysisLLMAgent"]
-LLMA -.->|cognitive analysis| DA
-USER -->|POST /approve| APA
-USER -->|POST /execute| POA
-USER -->|POST /outcome| OA
-USER -->|POST /swarm/requirements| RA
-```
+<img src="assets/d2.png" alt="Swarm Agent Topology" width="100%">
 
 #### Agent Responsibility Matrix
 
