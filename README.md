@@ -188,35 +188,7 @@ The swarm runtime wires 14 specialized agents through a shared EventBus. Each ag
 
 ### Enterprise Integration Layer
 
-```mermaid
-flowchart TB
-subgraph Swarm["Swarm Runtime"]
-  POA["PurchaseOrderAgent"]
-  ETA["ExecutionTrackingAgent"]
-  IDEMP["IdempotencyGuard<br/>(decision_id + action)"]
-end
-subgraph Factory["Connector Factory"]
-  CFG["ConnectorConfig<br/>provider / mode / endpoint / credentials"]
-  BUILD["build_connector(config) → BaseConnector"]
-end
-subgraph Adapters["Runtime-Adaptive Adapters"]
-  MOCK["MockConnector<br/>SUBMITTED → CONFIRMED → SHIPPED → DELIVERED"]
-  SUP["SupplierAPIConnector"]
-  SAP["SAPConnector"]
-  ORA["OracleConnector"]
-  COU["CoupaConnector"]
-end
-subgraph Audit["Audit Trail"]
-  ECA["ExternalCallArtifact<br/>{system, action, request, response, idempotency_key}"]
-end
-
-POA -->|submit_order| IDEMP
-ETA -->|get_order_status| IDEMP
-IDEMP -->|deduplicated| Factory
-Factory --> Adapters
-Adapters -->|recorded| ECA
-ECA -->|lineage to| Swarm
-```
+<img src="assets/d3.png" alt="Enterprise Integration Layer" width="100%">
 
 #### Environment-Driven Connector Selection
 
@@ -233,28 +205,7 @@ ECA -->|lineage to| Swarm
 
 Every artifact in `SwarmState` carries `parent_ids`, creating an immutable DAG:
 
-```mermaid
-flowchart TD
-REQ["requirement"] --> STR["strategy"]
-STR --> SL["supplier_list"]
-SL --> E1["evaluation_SupplierA"]
-SL --> E2["evaluation_SupplierB"]
-E1 --> Q1["quote_SupplierA"]
-E2 --> Q2["quote_SupplierB"]
-Q1 --> D["decision"]
-Q2 --> D
-D --> DE["decision_explanation"]
-D --> CV["contract_validation"]
-CV --> RA["risk_assessment"]
-RA --> GD["governance_decision"]
-GD --> EA["execution_authorization"]
-EA --> PO["purchase_order"]
-PO --> ES["execution_status"]
-PO --> EC1["external_call: submit_order"]
-ES --> EC2["external_call: get_status"]
-ES --> OUT["procurement_outcome"]
-OUT --> SP["supplier_performance"]
-```
+<img src="assets/d4.png" alt="Artifact Lineage DAG" width="100%">
 
 **Lineage Guarantees:**
 
