@@ -2,15 +2,14 @@
   <h1 align="center">Autonomous Procurement Swarm</h1>
   <p align="center">
     <b>Production-grade, deterministic multi-agent procurement</b><br>
-    Cryptographic audit trails · Enterprise ERP integration · Zero-LLM governance
+    Cryptographic audit trails · Enterprise ERP integration · Zero-LLM governance · Offline policy learning
   </p>
   <p align="center">
-    <a href="https://github.com/aragit/autonomous-procurement-swarm/actions/workflows/ci.yml">
-      <img src="https://github.com/aragit/autonomous-procurement-swarm/actions/workflows/ci.yml/badge.svg" alt="CI">
-    </a>
-    <a href="https://github.com/aragit/autonomous-procurement-swarm/blob/main/LICENSE">
-      <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
-    </a>
+    <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python: 3.11+">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
+    <img src="https://img.shields.io/badge/status-production--ready-brightgreen" alt="Status: Production-ready">
+    <img src="https://img.shields.io/badge/tests-47%2B%20unit-brightgreen" alt="Tests: 47+ unit + integration">
+    <img src="https://img.shields.io/badge/version-v0.8.2--unreleased-orange" alt="Version">
   </p>
 </p>
 
@@ -20,6 +19,10 @@
 
 - [Overview](#overview)
 - [Design Philosophy](#design-philosophy)
+- [Adaptive Intelligence Layer](#adaptive-intelligence-layer)
+  - [Policy Learning](#policy-learning)
+  - [Adaptive Routing](#adaptive-routing)
+  - [Contextual Parameter Adaptation (Step 25)](#contextual-parameter-adaptation-step-25)
 - [Architecture](#architecture)
   - [Dual-Runtime Model](#dual-runtime-model)
   - [Swarm Agent Topology](#swarm-agent-topology)
@@ -32,7 +35,10 @@
 - [API Reference](#api-reference)
   - [Auction Engine (Legacy Core)](#auction-engine-legacy-core)
   - [Deterministic Swarm](#deterministic-swarm)
+  - [Policy & Learning](#policy--learning)
   - [LLM Observability](#llm-observability)
+- [Determinism vs Adaptation](#determinism-vs-adaptation)
+- [Replay-Based Evaluation](#replay-based-evaluation)
 - [CLI & Examples](#cli--examples)
 - [Testing](#testing)
 - [Performance](#performance)
@@ -48,7 +54,9 @@
 
 **Autonomous Procurement Swarm** is a dual-runtime, production-grade system for autonomous procurement negotiations. It combines two execution models under a single FastAPI control plane:
 
-| Feature | Core Auction Engine (`core/`) | Deterministic Swarm (`swarm/`) |
+> **Note on terminology:** This system is not a decentralized swarm in the academic sense. The term "swarm" refers to a **deterministic, event-driven multi-agent orchestration system** designed for auditability, control, and bounded adaptation. Agents communicate via a shared EventBus with zero direct coupling.
+
+| Feature | Core Auction Engine (`core/`) | Deterministic Orchestration (`swarm/`) |
 |---|---|---|
 | **Execution Model** | LLM-powered 1×N sealed-bid reverse auctions | 14-agent event-driven system, zero LLM in control path |
 | **Scoring** | Multi-criteria weighted scoring | Deterministic, policy-driven scoring |
@@ -56,7 +64,7 @@
 | **Ledger** | SHA-256 hash-chained PostgreSQL | Append-only event store |
 | **Integration** | Hardcoded adapters | Runtime-configurable connector factory |
 
-The swarm runtime is the **primary execution path** for new work. The core auction engine remains available for backward-compatible sealed-bid auctions and as the LLM-powered bid-generation backend.
+The orchestration runtime (colloquially "the swarm") is the **primary execution path** for new work. The core auction engine remains available for backward-compatible sealed-bid auctions and as the LLM-powered bid-generation backend.
 
 ### What Makes This Different
 
@@ -69,6 +77,7 @@ The swarm runtime is the **primary execution path** for new work. The core aucti
 | Auditability | Transaction logs | Cryptographic hash chains + artifact lineage + deterministic timeline projection |
 | Supplier Memory | Static vendor master | Behavioral embeddings + performance feedback loops |
 | LLM Usage | Everywhere (unpredictable) | Isolated to bid generation and cognitive analysis only |
+| Adaptation | None | Offline replay-based policy learning with explicit promotion |
 
 ---
 
@@ -80,8 +89,62 @@ The swarm runtime is the **primary execution path** for new work. The core aucti
 | **Observability by Default** | Every event, artifact, and external call is recorded with full lineage. |
 | **Auditability as a Feature** | SHA-256 hash-chained ledger, artifact parentage DAGs, timeline projection. |
 | **Replay Safety** | All decisions are pure functions of state — re-runs produce identical results. |
+| **Controlled Adaptation** | Policy learning + contextual overrides enable bounded, auditable system evolution without sacrificing determinism |
 | **Extensibility via Composition** | New scoring criteria, policy rules, LLM backends, ERP connectors, and domain agents are plug-and-play via capability registration. |
 | **Zero Agent Coupling** | Agents communicate exclusively through the EventBus. No agent holds a direct reference to another. |
+
+---
+
+## Adaptive Intelligence Layer
+
+The system is no longer purely static. It incorporates a **controlled adaptation layer** — offline, replay-based policy learning and contextual parameter adjustment — that evolves system behavior without compromising determinism or auditability.
+
+> Learning is **offline** and **explicit**. No policy changes occur during live execution. Adaptation happens between runs via explicit policy promotion. The execution path for any given input + policy version is always deterministic and reproducible.
+
+### Policy Learning
+
+Policies are learned from historical traces and feedback signals:
+
+1. **Trace Gathering** — Historical procurement runs are collected from the event store, each with artifacts (decisions, scores) and feedback (success, outcome scores).
+2. **Candidate Generation** — A deterministic grid of strategy + parameter variants is generated around the active policy.
+3. **Replay Evaluation** — Each candidate is evaluated by replaying historical traces through the deterministic replay engine. No live system calls or state mutations occur.
+4. **Promotion** — Only candidates that exceed the active policy's metric by a safety margin are eligible for promotion. Promotion is **explicit** — no automatic unsafe mutation is permitted.
+
+**Safety guarantees:**
+- All candidate parameters (thresholds, weights) are clamped to safe bounds.
+- Drift from the active policy is bounded by `POLICY_MAX_PARAM_DELTA` (±0.20 per parameter).
+- Zero-delta and out-of-bounds overrides are rejected during validation.
+- Force-promote is available only as a rollback mechanism with explicit operator action.
+
+### Adaptive Routing
+
+Strategy selection is **context-aware** but remains fully deterministic:
+
+- A **routing strategy** maps trace context (budget level, urgency, supplier pool size) to a strategy type (`balanced`, `cost_optimized`, `quality_first`, `trust_weighted`) plus **parameter overrides**.
+- Routing rules are evaluated deterministically using **priority-based conflict resolution**:
+  - All matching rules are evaluated.
+  - The **highest priority** rule wins.
+  - Ties are broken by **fewer conditions** (more general rule wins).
+  - Further ties are resolved by **stable `rule_id` ordering**.
+- Context is **normalized** (lowercased keys, stripped strings, `None` values removed) before matching to ensure deterministic rule evaluation regardless of input formatting.
+- If no rule matches, the **default strategy** is used.
+
+### Contextual Parameter Adaptation (Step 25)
+
+Parameters can be contextually overridden at runtime by routing rules:
+
+| Parameter Type | Overrideable Parameters | Default Delta Bound | Clamp Range |
+|---|---|---|---|
+| Evaluation Thresholds | `confidence_threshold`, `stability_threshold`, `trust_threshold` | ±0.05 | [0.6, 0.9] |
+| Scoring Weights | `price_weight`, `score_weight`, `carbon_weight` | ±0.10 | [0.1, 0.8], re-normalized |
+
+**Guardrails:**
+- Each rule may specify **at most 2 parameter deltas** (`MAX_PARAMS_PER_RULE`).
+- Total absolute delta across all overrides in a single rule is capped at **0.15** (`PARAM_OVERRIDE_TOTAL_DELTA_CAP`).
+- Zero-delta overrides are rejected (noise filter).
+- All overrides are validated at policy creation time via `validate_param_overrides()`.
+- Thresholds and weights are **clamped** and **re-normalized** after applying deltas, ensuring safety bounds are never violated.
+- An **idempotency flag** (`_overrides_applied_flag`) prevents double application when both the runtime path and the replay path would apply the same overrides.
 
 ---
 
@@ -134,6 +197,8 @@ SwarmRuntime -->|idempotent external calls| Enterprise
 SwarmRuntime -->|read-only projection| TIMELINE
 Enterprise -->|ExternalCallArtifact| STATE
 ```
+
+**Key architectural note:** Strategy selection and parameter adaptation are now **dynamic** — the `StrategyAgent` resolves a context-aware strategy at runtime via `AdaptivePolicyEngine`, and evaluation thresholds/weights can be contextually overridden via `ContextualParameterAdapter`. The `ReplayEngine` (offline) uses the same deterministic logic to evaluate candidate policies before promotion.
 
 ### Swarm Agent Topology
 
@@ -614,6 +679,86 @@ The crown jewel of observability. A causally ordered, read-only projection that 
 | `GET` | `/swarm/trace/{request_id}` | Raw execution trace |
 | `GET` | `/swarm/state/{request_id}` | Full serialized state snapshot |
 
+### Policy & Learning
+
+The Adaptive Intelligence Layer exposes a controlled, offline API for policy evolution. Learning and activation are **separated** — learning never triggers live behavior changes.
+
+#### `POST /policies/learn`
+
+Idempotent. Gathers historical traces + feedback from the event store, generates candidate policies via grid search, evaluates each via the replay engine, and returns the best-eligible policy.
+
+**Request:**
+
+```json
+{}  // empty — uses all available traces
+```
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "best": {
+    "version": "6e8a51562c78",
+    "strategy_type": "balanced",
+    "thresholds": {...},
+    "weights": {...},
+    "metric": 0.847,
+    "success_rate": 0.89,
+    "decision_stability": 0.91
+  },
+  "candidates_evaluated": 128,
+  "trace_count": 32
+}
+```
+
+#### `POST /policies/promote`
+
+Atomically activates a selected policy version. Only the explicitly-chosen version is activated — no automatic promotion occurs.
+
+**Request:**
+
+```json
+{
+  "version": "6e8a51562c78",
+  "force": false
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": "promoted",
+  "version": "6e8a51562c78"
+}
+```
+
+**Promotion rules:**
+
+- `force: false` — fails unless the candidate's metric exceeds the active policy by a safety margin.
+- `force: true` — allows rollback to a previously-promoted version (operator-initiated).
+
+#### `GET /policies/active`
+
+Returns the currently active policy (thresholds, weights, strategy, version).
+
+**Response:**
+
+```json
+{
+  "version": "6e8a51562c78",
+  "signature": "a1b2c3d4e5f6...",
+  "thresholds": {"confidence_threshold": 0.7, "stability_threshold": 0.7, "trust_threshold": 0.7},
+  "weights": {"price_weight": 0.4, "score_weight": 0.4, "carbon_weight": 0.2},
+  "strategy": {"type": "routing", "rules": [...], "default": "balanced"},
+  "metric": 0.847,
+  "active": true
+}
+```
+
+**Safety-first model:** Learning and promotion are explicit, separate operations. No policy enters production without an explicit `POST /policies/promote` call.
+
 ### LLM Observability
 
 Mounted at `/llm-obs` (v0.9). Provides read-only cognitive analysis of swarm runs.
@@ -774,6 +919,53 @@ See `SECURITY.md` for responsible disclosure policy.
 
 ---
 
+## Determinism vs Adaptation
+
+This is a critical distinction for production credibility:
+
+| Aspect | Determinism | Adaptation |
+|---|---|---|
+| **When** | Per-execution | Between runs |
+| **Trigger** | Input + policy version | Explicit `POST /policies/promote` |
+| **Storage** | In-memory state, event log | Event store (traces + feedback) |
+| **Risk** | None — pure functions | Bounded — validated candidates only |
+| **Audit Trail** | Timeline projection | Policy version history + promotion log |
+
+**Execution remains deterministic for a given input + policy version.** The same requirement dispatched against the same active policy will always produce the same decision, timeline, and artifacts.
+
+**Adaptation happens offline and between runs:**
+
+1. The replay engine evaluates candidate policies against historical traces.
+2. An operator (or automated safety-check script) reviews the results.
+3. An explicit `POST /policies/promote` call activates the new version.
+4. All subsequent executions use the new policy — deterministically, reproducibly.
+
+No learning, no LLM call, and no policy mutation occurs during live procurement execution.
+
+---
+
+## Replay-Based Evaluation
+
+The replay engine provides a **sandboxed, deterministic** environment for evaluating candidate policies:
+
+- **Historical traces** (events + artifacts + feedback) are loaded from the event store.
+- The **replay engine** re-executes each trace using the candidate's thresholds, weights, and routing rules — **no external calls, no state mutations**.
+- The **`IdempotencyGuard`** prevents any external side effects from being re-executed.
+- An **overrides-applied flag** prevents double application of contextual parameter overrides across nested replay contexts.
+- **Artifact lineage** from the original run is reused for timeline projection — the replayed event stream is projected into the same causal structure.
+
+**Evaluation metric (hybrid objective):**
+
+```
+metric = 0.5 × feedback_success_rate
+       + 0.3 × feedback_outcome_score
+       + 0.2 × decision_stability
+```
+
+Where `decision_stability` is the fraction of replays that reproduce the originally persisted chosen supplier.
+
+---
+
 ## Troubleshooting
 
 ### Connection refused to PostgreSQL
@@ -809,6 +1001,16 @@ The production Dockerfile excludes PyTorch by default. Change to `pip install -e
 ---
 
 ## Changelog
+
+### [Unreleased] — Adaptive Intelligence Layer (Steps 20–25)
+
+- **Policy Learning**: Offline replay-based candidate generation and evaluation from historical traces + feedback
+- **Adaptive Routing** (Step 24): Context-aware strategy selection via routing rules with priority-based conflict resolution
+- **Contextual Parameter Adaptation** (Step 25): Runtime adjustment of thresholds and weights bounded by delta caps, clamping, and normalization
+- **Policy & Learning APIs**: `POST /policies/learn`, `POST /policies/promote`, `GET /policies/active`
+- **Idempotency Guard for Overrides**: Prevents double application of parameter overrides in nested execution contexts
+- **Safety Validation**: Zero-delta rejection, total delta cap (0.15), MAX_PARAMS_PER_RULE=2 enforcement
+- **47+ unit tests** covering all adaptive intelligence components
 
 ### [Unreleased] — Runtime Configuration & Governance Hardening
 
