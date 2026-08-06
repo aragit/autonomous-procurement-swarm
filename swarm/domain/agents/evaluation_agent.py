@@ -40,6 +40,11 @@ from swarm.domain.artifacts import (
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.pricing import bid_bond_amount, carbon_footprint, floor_price, lead_time_days
 from swarm.domain.strategy import BALANCED_STRATEGY, DEFAULT_STRATEGIES, Strategy
+from swarm.learning.adaptive_policy import (
+    apply_strategy_weights,
+    get_strategy_type,
+    get_strategy_weights,
+)
 from swarm.memory import SupplierMemoryStore
 
 logger = structlog.get_logger(__name__)
@@ -190,12 +195,110 @@ class EvaluationAgent(BaseAgent):
 
     @staticmethod
     def _read_strategy(state: SwarmState) -> Strategy:
-        """The active strategy artifact, defaulting to balanced."""
+        """The active strategy artifact, defaulting to balanced.
+
+        v1.1 Step 22: when strategy weights are pinned (via the
+        ``override_strategy_weights`` ContextVar — set by the policy learner
+        during candidate evaluation, and by the active promoted policy), those
+        weights override the canonical artifact weights so candidate policies
+        are evaluated with full replay parity. When no override is pinned
+        (live operation or no promoted policy) the canonical, artifact-derived
+        strategy is used unchanged.
+
+        v1.1 Step 23: the strategy *type* is resolved via
+        :func:`get_strategy_type` with the same priority (override → active
+        policy → config default). If the resolved type differs from
+        ``"balanced"``, the weight transformation is applied deterministically
+        to the base weights, then re-clamped and normalized.
+
+        v1.1 Step 24: when the active policy uses a routing strategy, the
+        strategy type is selected per-trace via context routing:
+        ``context → strategy``. Context is extracted from the trace pool data
+        and passed to :func:`get_strategy_type` for routing rule evaluation.
+
+        v1.1 Step 25: param overrides from the routing strategy are applied to
+        the resolved weights, adjusting thresholds and weight deltas per-trace.
+        """
+        from swarm.learning.adaptive_policy import get_param_overrides
+        from swarm.learning.context import extract_context as _extract_context
+        from swarm.learning.policy import clamp_weights
+        from swarm.learning.routing import apply_param_overrides
+
         artifact = state.get_artifact(STRATEGY_ARTIFACT_NAME)
         if artifact is None:
-            return BALANCED_STRATEGY
-        name = str(artifact.data.get("strategy_name") or "balanced")
-        return DEFAULT_STRATEGIES.get(name, BALANCED_STRATEGY)
+            base = BALANCED_STRATEGY
+        else:
+            name = str(artifact.data.get("strategy_name") or "balanced")
+            base = DEFAULT_STRATEGIES.get(name, BALANCED_STRATEGY)
+
+        # Extract context from state for routing (Step 24).
+        context = EvaluationAgent._extract_context_from_state(state, _extract_context)
+        strat_type = get_strategy_type(context=context)
+
+        # Resolve base weights (override or canonical).
+        override = get_strategy_weights()
+        if override is None:
+            if strat_type == "balanced":
+                resolved_weights = base.as_weights()
+            else:
+                transformed = apply_strategy_weights(strat_type, base.as_weights())
+                resolved_weights = transformed
+        else:
+            if strat_type == "balanced":
+                resolved_weights = dict(override)
+            else:
+                resolved_weights = apply_strategy_weights(strat_type, override)
+
+        # Apply param overrides on weights (Step 25).
+        param_overrides = get_param_overrides(context)
+        weight_overrides = {
+            k: v
+            for k, v in param_overrides.items()
+            if k in ("price_weight", "score_weight", "carbon_weight")
+        }
+        if weight_overrides:
+            thresholds_override = {
+                k: 0.7
+                for k in ("confidence_threshold", "stability_threshold", "trust_threshold")
+            }
+            _, resolved_weights = apply_param_overrides(
+                thresholds_override, clamp_weights(resolved_weights), weight_overrides
+            )
+
+        return Strategy(
+            name=base.name,
+            description=base.description,
+            price_weight=resolved_weights["price_weight"],
+            score_weight=resolved_weights["score_weight"],
+            carbon_weight=resolved_weights["carbon_weight"],
+        )
+
+    @staticmethod
+    def _extract_context_from_state(
+        state: SwarmState, extract_fn: Any
+    ) -> dict[str, Any]:
+        """Extract routing context from the state's supplier pool artifact.
+
+        Builds a trace-input-compatible dict from the pool artifact and applies
+        :func:`extract_context` to produce the routing context deterministically.
+        """
+        pool = state.get_artifact(SUPPLIER_LIST_ARTIFACT_NAME)
+        if pool is None:
+            return {"budget_level": "medium", "urgency": "low", "supplier_count": 3}
+        pool_data = pool.data if hasattr(pool, "data") else {}
+        trace_input = {
+            "material": str(pool_data.get("material", "steel")),
+            "quantity": int(pool_data.get("quantity", 1000)),
+            "budget": float(pool_data.get("budget", 0.0)),
+            "target_lead_time_days": int(pool_data.get("target_lead_time_days", 30)),
+            "max_carbon_per_unit": pool_data.get("max_carbon_per_unit"),
+            "goal": pool_data.get("goal"),
+            "supplier_count": len(pool_data.get("suppliers", [])) or int(
+                pool_data.get("supplier_count", 3)
+            ),
+        }
+        result: dict[str, Any] = extract_fn(trace_input)
+        return result
 
     async def act(self, state: SwarmState) -> None:
         if not self._pending or self._evaluation is None:

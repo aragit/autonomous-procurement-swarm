@@ -130,6 +130,10 @@ app.include_router(_procurement_router)
 from swarm.api.simulation import router as _simulation_router
 app.include_router(_simulation_router)
 
+# Mount the closed-loop policy learning + promotion endpoints (v1.1 Step 22)
+from swarm.api.policies import router as _policies_router
+app.include_router(_policies_router)
+
 
 class AuctionRequest(BaseModel):
     material: str = "steel"

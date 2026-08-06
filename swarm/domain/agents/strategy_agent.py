@@ -72,6 +72,7 @@ from swarm.domain.artifacts import (
 from swarm.domain.events import ProcurementEventType
 from swarm.domain.strategy import Strategy, select_strategy
 from swarm.learning.adaptive_policy import get_adaptive_thresholds
+from swarm.learning.context import extract_context
 from swarm.storage.event_store import store_llm_record
 from swarm.utils.llm_consensus import compute_llm_consensus
 from swarm.utils.llm_drift import detect_drift
@@ -155,8 +156,13 @@ class StrategyAgent(BaseAgent):
         constraints = requirement.data.get("constraints", {})
         self._strategy = select_strategy(constraints)
 
+        # Extract routing context from requirement (Step 24/25).
+        context = extract_context(requirement.data)
+        # Param overrides are applied at read-time in the eval agent's
+        # _read_strategy via get_param_overrides (Step 25).
+
         # Compute adaptive thresholds once for all threshold-dependent decisions
-        thresholds = get_adaptive_thresholds()
+        thresholds = get_adaptive_thresholds(context)
 
         # Advisory-only: read latest LLM completion output if one exists.
         # The strategy selection logic above is NOT affected by this.

@@ -62,7 +62,7 @@ class TestInitDb:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
         }
-        assert tables == {"events", "artifacts", "llm_history", "feedback"}
+        assert tables == {"events", "artifacts", "llm_history", "feedback", "policies"}
         conn.close()
 
 

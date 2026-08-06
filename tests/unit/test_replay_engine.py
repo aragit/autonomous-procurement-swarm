@@ -24,6 +24,7 @@ from swarm.storage.event_store import (
     store_artifact,
     store_event,
     store_feedback,
+    store_policy,
 )
 
 
@@ -140,9 +141,12 @@ class TestRunProcurement:
         assert r1["llm"]["thresholds_source"] == r2["llm"]["thresholds_source"]
         assert r1["trace_id"] == r2["trace_id"]
 
-    def test_adaptive_vs_static_thresholds_differ_with_feedback(self, initialized_db: str) -> None:
-        # Seed enough feedback (>= MIN_FEEDBACK_SAMPLES) of failures with low
-        # outcome scores so adaptive thresholds are shifted away from config.
+    def test_adaptive_equals_static_without_active_policy(self, initialized_db: str) -> None:
+        """v1.1 Step 22: feedback is no longer read at runtime. With no promoted
+        active policy, the adaptive path falls back to config, so the resolved
+        thresholds equal the static path — even when feedback exists in the DB."""
+        # Seed failures with low outcome scores (would have shifted adaptive
+        # thresholds under the old Step 20 runtime feedback path).
         for i in range(6):
             store_feedback(
                 f"TRACE-ADAPT-{i}",
@@ -155,16 +159,25 @@ class TestRunProcurement:
         adaptive = run_procurement(REQUIREMENT_INPUT, adaptive=True)
         static = run_procurement(REQUIREMENT_INPUT, adaptive=False)
 
-        assert adaptive["llm"]["thresholds_source"] == "adaptive"
-        assert static["llm"]["thresholds_source"] == "static"
-        assert adaptive["llm"]["thresholds_used"] != static["llm"]["thresholds_used"]
-
-    def test_no_feedback_adaptive_equals_static(self) -> None:
-        # With no feedback the adaptive path falls back to config defaults,
-        # so thresholds_used should match the static config thresholds.
-        adaptive = run_procurement(REQUIREMENT_INPUT, adaptive=True)
-        static = run_procurement(REQUIREMENT_INPUT, adaptive=False)
+        # No active policy -> both resolve to config thresholds (feedback-free runtime).
         assert adaptive["llm"]["thresholds_used"] == static["llm"]["thresholds_used"]
+
+    def test_active_policy_changes_replay_thresholds(self, initialized_db: str) -> None:
+        """A promoted active policy is picked up by the adaptive replay path."""
+        active_thr = {
+            "confidence_threshold": 0.75,
+            "stability_threshold": 0.75,
+            "trust_threshold": 0.75,
+        }
+        store_policy(
+            version="POL-REPLAY-1",
+            signature="sig-replay-1",
+            thresholds=active_thr,
+            weights={"price_weight": 0.4, "score_weight": 0.4, "carbon_weight": 0.2},
+            active=True,
+        )
+        adaptive = run_procurement(REQUIREMENT_INPUT, adaptive=True)
+        assert adaptive["llm"]["thresholds_used"] == active_thr
 
     def test_does_not_mutate_production_trace(self, initialized_db: str) -> None:
         trace_id = generate_trace_id(RequirementPayload(**REQUIREMENT_INPUT))

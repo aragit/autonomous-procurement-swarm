@@ -11,6 +11,7 @@ served from the database rather than in-memory state.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from typing import Any
 
@@ -24,7 +25,9 @@ from swarm.domain.wiring import build_procurement_swarm
 from swarm.learning.adaptive_policy import (
     get_adaptive_thresholds,
     get_config_thresholds,
+    override_strategy_weights,
     override_thresholds,
+    reset_overrides_flag,
 )
 from swarm.storage.event_store import store_artifact, store_event, store_feedback
 from swarm.utils.llm_drift import detect_drift
@@ -136,6 +139,7 @@ async def execute_procurement(
     trace_id: str | None = None,
     adaptive: bool = True,
     thresholds: dict[str, float] | None = None,
+    weights: dict[str, float] | None = None,
 ) -> tuple[dict[str, Any], SwarmState]:
     """Run the procurement swarm and assemble the observability response.
 
@@ -150,7 +154,11 @@ async def execute_procurement(
             when omitted.
         adaptive: When False, config-only thresholds are used (no database read).
         thresholds: Optional explicit thresholds to pin during the run. When
-            supplied, the ``adaptive`` flag is ignored for threshold selection.
+            supplied, the ``adaptive`` flag is ignored for threshold selection
+            and these thresholds are used directly (used by the policy learner).
+        weights: Optional explicit strategy weights to pin during the run, routed
+            through ``override_strategy_weights`` so candidate policies are
+            evaluated with replay parity.
 
     Returns:
         A ``(response, state)`` tuple where ``response`` mirrors the endpoint
@@ -160,9 +168,23 @@ async def execute_procurement(
         trace_id = generate_trace_id(requirement)
 
     if thresholds is None:
-        thresholds = get_adaptive_thresholds() if adaptive else get_config_thresholds()
+        from swarm.learning.context import extract_context
 
-    with override_thresholds(thresholds):
+        routing_ctx = extract_context(
+            {
+                "budget": requirement.budget,
+                "target_lead_time_days": requirement.target_lead_time_days,
+                "supplier_count": requirement.supplier_count,
+            }
+        )
+        thresholds = get_adaptive_thresholds(routing_ctx) if adaptive else get_config_thresholds()
+
+    ctx = override_thresholds(thresholds)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(ctx)
+        stack.enter_context(reset_overrides_flag())
+        if weights is not None:
+            stack.enter_context(override_strategy_weights(weights))
         try:
             swarm = await run_swarm(trace_id, requirement)
         except Exception as exc:

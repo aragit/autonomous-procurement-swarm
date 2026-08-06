@@ -16,6 +16,7 @@ from swarm.config import (
 from swarm.learning.adaptive_policy import (
     compute_adaptive_thresholds,
     get_adaptive_thresholds,
+    override_thresholds,
 )
 
 
@@ -153,6 +154,13 @@ class TestComputeAdaptiveThresholds:
 
 
 class TestGetAdaptiveThresholds:
+    """v1.1 Step 22 changed the runtime resolution to a strict priority:
+
+    override_thresholds -> active_policy.thresholds -> config fallback.
+
+    Feedback is no longer read at runtime (learning/execution separation).
+    """
+
     def test_returns_defaults_when_no_db(self, monkeypatch) -> None:
         original = ENABLE_LEARNING
         import swarm.config as cfg
@@ -179,7 +187,8 @@ class TestGetAdaptiveThresholds:
             "trust_threshold": TRUST_THRESHOLD,
         }
 
-    def test_threshold_adjusts_after_feedback(self, monkeypatch, tmp_path) -> None:
+    def test_feedback_does_not_affect_runtime_thresholds(self, monkeypatch, tmp_path) -> None:
+        """Feedback is no longer read at runtime — runtime separation (Step 22)."""
         import swarm.storage.event_store as es
         from swarm.storage.event_store import store_feedback
 
@@ -187,7 +196,6 @@ class TestGetAdaptiveThresholds:
         es._DB_PATH = db_path
         es.init_db(db_path)
 
-        # Store enough feedback with failures to trigger adaptation
         for i in range(MIN_FEEDBACK_SAMPLES + 5):
             store_feedback(
                 trace_id=f"T{i}",
@@ -197,8 +205,55 @@ class TestGetAdaptiveThresholds:
             )
 
         result = get_adaptive_thresholds()
-        assert result["confidence_threshold"] < CONFIDENCE_THRESHOLD
-        assert result["stability_threshold"] > STABILITY_THRESHOLD
+        # No active policy -> config fallback, untouched by feedback.
+        assert result == {
+            "confidence_threshold": CONFIDENCE_THRESHOLD,
+            "stability_threshold": STABILITY_THRESHOLD,
+            "trust_threshold": TRUST_THRESHOLD,
+        }
+
+    def test_active_policy_overrides_config(self, monkeypatch, tmp_path) -> None:
+        """A promoted active policy supersedes the config fallback at runtime."""
+        import swarm.storage.event_store as es
+        db_path = str(tmp_path / "active_adapt.db")
+        es._DB_PATH = db_path
+        es.init_db(db_path)
+
+        promoted = {
+            "confidence_threshold": 0.75,
+            "stability_threshold": 0.80,
+            "trust_threshold": 0.85,
+        }
+        # Inject a promoted active policy directly into the store.
+        es.store_policy(
+            version="POL-ADTEST",
+            signature="sig-ad-test",
+            thresholds=promoted,
+            weights={"price_weight": 0.4, "score_weight": 0.4, "carbon_weight": 0.2},
+            active=True,
+        )
+        result = get_adaptive_thresholds()
+        assert result == promoted
+
+    def test_override_contextvar_beats_active_policy(self, monkeypatch, tmp_path) -> None:
+        """The ContextVar override has the highest priority."""
+        import swarm.storage.event_store as es
+        db_path = str(tmp_path / "overlay_adapt.db")
+        es._DB_PATH = db_path
+        es.init_db(db_path)
+        es.store_policy(
+            version="POL-OVERLAY",
+            signature="sig-overlay",
+            thresholds={"confidence_threshold": 0.9, "stability_threshold": 0.9,
+                        "trust_threshold": 0.9},
+            weights={"price_weight": 0.5, "score_weight": 0.3, "carbon_weight": 0.2},
+            active=True,
+        )
+
+        pinned = {"confidence_threshold": 0.61, "stability_threshold": 0.62,
+                   "trust_threshold": 0.63}
+        with override_thresholds(pinned):
+            assert get_adaptive_thresholds() == pinned
 
     def test_deterministic_with_same_data(self, monkeypatch, tmp_path) -> None:
         import swarm.storage.event_store as es

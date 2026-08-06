@@ -36,7 +36,9 @@ from swarm.config import SIMULATION_LIMIT
 from swarm.learning.adaptive_policy import (
     get_adaptive_thresholds,
     get_config_thresholds,
+    override_strategy_weights,
     override_thresholds,
+    reset_overrides_flag,
 )
 from swarm.storage.event_store import (
     load_full_trace,
@@ -137,6 +139,8 @@ def run_procurement(
     original_input: dict[str, Any],
     *,
     adaptive: bool = True,
+    thresholds: dict[str, float] | None = None,
+    weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Re-execute a procurement from a reconstructed input dict.
 
@@ -148,7 +152,15 @@ def run_procurement(
         original_input: A dict for constructing :class:`RequirementPayload`.
         adaptive: When True, use feedback-derived (adaptive) thresholds read
             from the production store *before* isolation.  When False, use
-            config-only thresholds.
+            config-only thresholds.  Ignored for threshold selection when
+            ``thresholds`` is supplied explicitly.
+        thresholds: Optional explicit thresholds to pin during the run. When
+            supplied, the ``adaptive`` flag is ignored for threshold selection
+            and the candidate's thresholds are used directly (used by the
+            policy learner for candidate evaluation).
+        weights: Optional explicit strategy weights to pin during the run,
+            routed through ``override_strategy_weights`` so candidate policies
+            are evaluated with replay parity.
 
     Returns:
         A result dict with ``selected_supplier``, ``score``, ``strategy``,
@@ -161,9 +173,18 @@ def run_procurement(
     # Read thresholds from the production store BEFORE isolating writes so that
     # adaptive=True reflects accumulated feedback, while isolation still keeps
     # the re-run from mutating any production state.
-    thresholds = get_adaptive_thresholds() if adaptive else get_config_thresholds()
+    if thresholds is None:
+        from swarm.learning.context import extract_context
 
-    with _isolate_storage(), override_thresholds(thresholds):
+        ctx = extract_context(original_input)
+        thresholds = get_adaptive_thresholds(ctx) if adaptive else get_config_thresholds()
+
+    with (
+        _isolate_storage(),
+        override_thresholds(thresholds),
+        override_strategy_weights(weights),
+        reset_overrides_flag(),
+    ):
         try:
             response, _state = asyncio.run(
                 execute_procurement(
@@ -171,6 +192,7 @@ def run_procurement(
                     trace_id=trace_id,
                     adaptive=adaptive,
                     thresholds=thresholds,
+                    weights=weights,
                 )
             )
         except Exception as exc:

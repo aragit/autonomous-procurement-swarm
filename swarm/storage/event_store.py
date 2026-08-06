@@ -10,6 +10,7 @@ Tables::
     artifacts   — every Artifact created during a trace
     llm_history — per-round LLM consensus records for drift/metrics
     feedback    — outcome / user feedback linked to a trace
+    policies    — learned candidate policies (v1.1 Step 22): thresholds + weights
 
 The store is keyed by ``trace_id`` (the correlation identifier for
 an entire procurement run).  Within a trace, ``correlation_id``
@@ -18,6 +19,7 @@ provides an additional layer of scoping (e.g. ``"TRACE-CONV"``).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from typing import Any
@@ -96,13 +98,29 @@ def init_db(db_path: str | None = None) -> None:
                 user_feedback TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS policies (
+                version TEXT PRIMARY KEY,
+                signature TEXT NOT NULL,
+                thresholds TEXT NOT NULL,
+                weights TEXT NOT NULL,
+                strategy TEXT NOT NULL,
+                metric REAL,
+                success_rate REAL,
+                avg_score REAL,
+                feedback_success_rate REAL,
+                feedback_outcome_score REAL,
+                decision_stability REAL,
+                active INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_policies_active_only
+                ON policies(active) WHERE active = 1;
             """
         )
         conn.commit()
     finally:
         conn.close()
-
-
 def store_event(trace_id: str, event_type: str, payload: dict[str, Any]) -> None:
     """Append an event row for the given trace.
 
@@ -376,5 +394,199 @@ def load_recent_trace_ids(limit: int = 100) -> list[str]:
             (limit,),
         ).fetchall()
         return [row[0] for row in rows]
+    finally:
+        conn.close()
+
+
+def load_policy_version_ids() -> list[str]:
+    """Return all stored policy versions (newest first).
+
+    The learner merges raw traces + raw feedback itself; this helper exposes
+    only the opaque version identifiers for candidates already in the store.
+    """
+    init_db()
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT version FROM policies ORDER BY created_at DESC"
+        ).fetchall()
+        return [row[0] for row in rows]
+    finally:
+        conn.close()
+
+
+def store_policy(
+    *,
+    version: str,
+    signature: str,
+    thresholds: dict[str, float],
+    weights: dict[str, float],
+    strategy: dict[str, Any] | None = None,
+    metric: float | None = None,
+    success_rate: float | None = None,
+    avg_score: float | None = None,
+    feedback_success_rate: float | None = None,
+    feedback_outcome_score: float | None = None,
+    decision_stability: float | None = None,
+    active: bool = False,
+) -> None:
+    """Persist a policy row. Idempotent on the (version) primary key.
+
+    If a row with the same ``version`` already exists it is left untouched
+    (preserving the first writer's metric/activation). This keeps
+    ``/policies/learn`` idempotent: the same candidate version is never
+    double-counted.
+
+    Args:
+        version: Deterministic 12-char policy version (``sha256(signature)[:12]``).
+        signature: The full canonical parameter signature used to derive version.
+        thresholds: The ``confidence/stability/trust`` threshold dict.
+        weights: The strategy ``price/score/carbon`` weight dict.
+        strategy: The strategy dict (e.g. ``{"type": "balanced"}``).
+        metric: Objective metric from candidate evaluation.
+        success_rate: Decision stability measured during evaluation.
+        avg_score: Average replayed score measured during evaluation.
+        feedback_success_rate: Fraction of traces marked successful in feedback.
+        feedback_outcome_score: Average outcome_score from feedback.
+        decision_stability: Fraction of replays reproducing the original supplier.
+        active: Whether this policy is currently active.
+    """
+    if strategy is None:
+        from swarm.config import DEFAULT_STRATEGY_TYPE
+        strategy = {"type": DEFAULT_STRATEGY_TYPE}
+    init_db()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO policies
+                (version, signature, thresholds, weights, strategy, metric,
+                 success_rate, avg_score, feedback_success_rate,
+                 feedback_outcome_score, decision_stability, active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                version,
+                signature,
+                _serialize(thresholds),
+                _serialize(weights),
+                _serialize(strategy),
+                metric,
+                success_rate,
+                avg_score,
+                feedback_success_rate,
+                feedback_outcome_score,
+                decision_stability,
+                1 if active else 0,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_policy(version: str) -> dict[str, Any] | None:
+    """Load a single policy row by version.
+
+    Returns ``None`` when no policy with that version exists.
+    """
+    init_db()
+    conn = _get_conn()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT version, signature, thresholds, weights, strategy, "
+            "metric, success_rate, avg_score, feedback_success_rate, "
+            "feedback_outcome_score, decision_stability, active, created_at "
+            "FROM policies WHERE version = ?",
+            (version,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "version": row["version"],
+            "signature": row["signature"],
+            "thresholds": _deserialize(row["thresholds"]),
+            "weights": _deserialize(row["weights"]),
+            "strategy": _deserialize(row["strategy"]),
+            "metric": row["metric"],
+            "success_rate": row["success_rate"],
+            "avg_score": row["avg_score"],
+            "feedback_success_rate": row["feedback_success_rate"],
+            "feedback_outcome_score": row["feedback_outcome_score"],
+            "decision_stability": row["decision_stability"],
+            "active": bool(row["active"]),
+            "created_at": row["created_at"],
+        }
+    finally:
+        conn.close()
+
+
+def load_active_policy() -> dict[str, Any] | None:
+    """Load the currently-active policy row, or ``None`` if none is active.
+
+    The active policy is the most recently promoted candidate. When none has
+    been promoted, the runtime falls back to config defaults via
+    :func:`~swarm.learning.adaptive_policy.get_adaptive_thresholds`.
+    """
+    init_db()
+    conn = _get_conn()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT version, signature, thresholds, weights, strategy, "
+            "metric, success_rate, avg_score, feedback_success_rate, "
+            "feedback_outcome_score, decision_stability, active, created_at "
+            "FROM policies WHERE active = 1 ORDER BY created_at ASC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "version": row["version"],
+            "signature": row["signature"],
+            "thresholds": _deserialize(row["thresholds"]),
+            "weights": _deserialize(row["weights"]),
+            "strategy": _deserialize(row["strategy"]),
+            "metric": row["metric"],
+            "success_rate": row["success_rate"],
+            "avg_score": row["avg_score"],
+            "feedback_success_rate": row["feedback_success_rate"],
+            "feedback_outcome_score": row["feedback_outcome_score"],
+            "decision_stability": row["decision_stability"],
+            "active": bool(row["active"]),
+            "created_at": row["created_at"],
+        }
+    finally:
+        conn.close()
+
+
+def set_policy_active(version: str) -> bool:
+    """Atomically promote a policy version to active.
+
+    Uses a single transaction to (1) deactivate any currently-active policy and
+    (2) mark ``version`` as active. The ``policies.active`` partial unique
+    constraint (UNIQUE(active) WHERE active = 1) guarantees at most one active
+    policy, so concurrent promote requests for the same or different versions
+    are serialized safely.
+
+    Returns:
+        True if the policy was activated, False if it did not exist.
+    """
+    init_db()
+    conn = _get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute("SELECT 1 FROM policies WHERE version = ?", (version,)).fetchone()
+        if existing is None:
+            conn.execute("ROLLBACK")
+            return False
+        conn.execute("UPDATE policies SET active = 0 WHERE active = 1")
+        conn.execute("UPDATE policies SET active = 1 WHERE version = ?", (version,))
+        conn.commit()
+        return True
+    except Exception:
+        with contextlib.suppress(Exception):
+            conn.execute("ROLLBACK")
+        raise
     finally:
         conn.close()
