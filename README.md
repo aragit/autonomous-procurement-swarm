@@ -31,7 +31,6 @@
   - [Swarm Agent Topology](#swarm-agent-topology)
   - [Enterprise Integration Layer](#enterprise-integration-layer)
   - [Artifact Lineage & Audit Trail](#artifact-lineage--audit-trail)
-  - [State Machines](#state-machines)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -217,22 +216,6 @@ Every artifact in `SwarmState` carries `parent_ids`, creating an immutable DAG:
 - `correlation_id` ties all artifacts and events to a single logical conversation
 - `created_by` records the agent name for accountability
 - `version` supports artifact evolution (latest wins on `get_artifact`)
-
-### State Machines
-
-```mermaid
-stateDiagram-v2
-    [*] --> INIT
-    INIT --> RFQ_BROADCAST
-    RFQ_BROADCAST --> BID_COLLECTION
-    BID_COLLECTION --> EVALUATION
-    EVALUATION --> SHORTLIST_BARTER
-    SHORTLIST_BARTER --> AWARDED
-    EVALUATION --> TERMINATED
-    SHORTLIST_BARTER --> TERMINATED
-    AWARDED --> [*]
-    TERMINATED --> [*]
-```
 
 ---
 
