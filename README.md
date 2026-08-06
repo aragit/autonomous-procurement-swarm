@@ -152,7 +152,7 @@ Parameters can be contextually overridden at runtime by routing rules:
 
 ### Dual-Runtime Model
 
-```
+```mermaid
 flowchart TB
 subgraph ControlPlane["FastAPI Control Plane"]
   API["api.main:app"]
@@ -204,7 +204,7 @@ Enterprise -->|ExternalCallArtifact| STATE
 
 The swarm runtime wires 14 specialized agents through a shared EventBus. Each agent implements `perceive → act` and publishes domain events. Agents are routed by event type and capability, not by direct reference.
 
-```
+```mermaid
 flowchart LR
 USER["User / API"] -->|CreateRequirement| RA["RequirementAgent"]
 RA -->|RequirementCreated| ST["StrategyAgent"]
@@ -255,7 +255,7 @@ USER -->|POST /swarm/requirements| RA
 
 ### Enterprise Integration Layer
 
-```
+```mermaid
 flowchart TB
 subgraph Swarm["Swarm Runtime"]
   POA["PurchaseOrderAgent"]
@@ -300,7 +300,7 @@ ECA -->|lineage to| Swarm
 
 Every artifact in `SwarmState` carries `parent_ids`, creating an immutable DAG:
 
-```
+```mermaid
 flowchart TD
 REQ["requirement"] --> STR["strategy"]
 STR --> SL["supplier_list"]
@@ -866,7 +866,7 @@ Covers 20 functional checks + 13 resilience checks (concurrent auctions, barteri
 
 ```bash
 python stress_test.py
-```
+```mermaid
 
 ---
 
@@ -1073,29 +1073,3 @@ git checkout -b feature/your-feature
 pip install -e ".[dev]"
 ruff check . && mypy core/ api/ swarm/ --ignore-missing-imports
 pytest tests/ -v
-```
-
-### Code Standards
-
-| Standard | Requirement |
-|---|---|
-| Type hints | All public functions must have return type annotations |
-| Async | All I/O-bound operations use `async`/`await` |
-| Pydantic | All data schemas use Pydantic v2 |
-| Logging | Use `structlog`, never `print()` |
-| Tests | All new features require unit tests; API changes require integration tests |
-| Determinism | No random without seed; no LLM in control-path agents |
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
-<div align="center">
-
-> Built with determinism, auditability, and game theory in mind.
->
-> *"The swarm does not think. The swarm decides — deterministically, defensibly, and with a complete paper trail."*
-
-</div>
