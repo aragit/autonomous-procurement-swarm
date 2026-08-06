@@ -1,9 +1,6 @@
 <p align="center">
   <h1 align="center">Autonomous Procurement Swarm</h1>
   <p align="center">
-    <img src="assets/logo_02.png" alt="Logo" width="200">
-  </p>
-  <p align="center">
     <b>Production-grade, deterministic multi-agent procurement</b><br>
     Cryptographic audit trails · Enterprise ERP integration · Zero-LLM governance · Offline policy learning
   </p>
