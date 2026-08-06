@@ -188,7 +188,9 @@ The swarm runtime wires 14 specialized agents through a shared EventBus. Each ag
 
 ### Enterprise Integration Layer
 
-<img src="assets/d3.png" alt="Enterprise Integration Layer" width="100%">
+<p align="center">
+  <img src="assets/d3.png" alt="Enterprise Integration Layer" width="50%">
+</p>
 
 #### Environment-Driven Connector Selection
 
@@ -205,7 +207,9 @@ The swarm runtime wires 14 specialized agents through a shared EventBus. Each ag
 
 Every artifact in `SwarmState` carries `parent_ids`, creating an immutable DAG:
 
-<img src="assets/d4.png" alt="Artifact Lineage DAG" width="100%">
+<p align="center">
+  <img src="assets/d4.png" alt="Artifact Lineage DAG" width="50%">
+</p>
 
 **Lineage Guarantees:**
 
