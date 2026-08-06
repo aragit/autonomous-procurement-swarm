@@ -575,30 +575,48 @@ The Adaptive Intelligence Layer exposes a controlled, offline API for policy evo
 
 Idempotent. Gathers historical traces + feedback from the event store, generates candidate policies via grid search, evaluates each via the replay engine, and returns the best-eligible policy.
 
-**Request:**
+**Request:** Empty body (`{}`) or omit — uses all available traces with feedback.
 
-```json
-{}  // empty — uses all available traces
-```
-
-**Response:**
+**Response (success):**
 
 ```json
 {
   "status": "ok",
+  "traces_available": 50,
+  "evalable_traces": 32,
+  "active_version": "6e8a51562c78",
+  "active_metric": 0.847,
   "best": {
-    "version": "6e8a51562c78",
-    "strategy_type": "balanced",
-    "thresholds": {...},
-    "weights": {...},
-    "metric": 0.847,
+    "version": "7a3f9c1b4d2e",
+    "metric": 0.861,
     "success_rate": 0.89,
+    "avg_score": 0.78,
+    "delta_from_active": 0.14,
+    "trace_count": 32,
+    "feedback_success_rate": 0.89,
+    "feedback_outcome_score": 0.85,
     "decision_stability": 0.91
   },
-  "candidates_evaluated": 128,
-  "trace_count": 32
+  "candidates": [...]
 }
 ```
+
+**Response (insufficient data):**
+
+```json
+{
+  "status": "insufficient_data",
+  "traces_available": 5,
+  "evalable_traces": 0,
+  "active_version": "6e8a51562c78",
+  "active_metric": 0.847,
+  "best": null,
+  "candidates": []
+}
+```
+
+- `candidates_evaluated` — total candidate policies generated and evaluated
+- `trace_count` — number of traces used for evaluation
 
 #### `POST /policies/promote`
 
@@ -636,7 +654,6 @@ Returns the currently active policy (thresholds, weights, strategy, version).
 ```json
 {
   "version": "6e8a51562c78",
-  "signature": "a1b2c3d4e5f6...",
   "thresholds": {"confidence_threshold": 0.7, "stability_threshold": 0.7, "trust_threshold": 0.7},
   "weights": {"price_weight": 0.4, "score_weight": 0.4, "carbon_weight": 0.2},
   "strategy": {"type": "routing", "rules": [...], "default": "balanced"},
