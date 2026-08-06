@@ -754,7 +754,7 @@ Covers 20 functional checks + 13 resilience checks (concurrent auctions, barteri
 
 ```bash
 python stress_test.py
-```mermaid
+```
 
 ---
 
@@ -850,7 +850,10 @@ metric = 0.5 × feedback_success_rate
        + 0.2 × decision_stability
 ```
 
-Where `decision_stability` is the fraction of replays that reproduce the originally persisted chosen supplier.
+Where:
+- `feedback_success_rate` — fraction of traces with `feedback.success == True`
+- `feedback_outcome_score` — mean of `feedback.outcome_score`
+- `decision_stability` — fraction of replays that reproduce the originally persisted chosen supplier
 
 ---
 
