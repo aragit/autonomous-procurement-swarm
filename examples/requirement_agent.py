@@ -65,6 +65,8 @@ class SimpleRequirementAgent(BaseAgent):
                 correlation_id=self._correlation_id,
             )
         )
+        if self.bus is None:
+            raise RuntimeError(f"Agent '{self.name}' has no event bus")
         await self.bus.publish(
             Event(
                 type=REQUIREMENT_CREATED,
