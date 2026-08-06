@@ -21,6 +21,9 @@ from core.memory.semantic import PgVectorMemoryStore
 from core.protocol.auction_orchestrator import AuctionOrchestrator
 from core.protocol.policy_engine import PolicyContext, PolicyEngine
 from swarm import SwarmState
+from swarm.api.policies import router as _policies_router
+from swarm.api.procurement import router as _procurement_router
+from swarm.api.simulation import router as _simulation_router
 from swarm.api.strategy import app as llm_observability_app
 from swarm.api.strategy import set_state_provider
 from swarm.core.timeline import build_timeline
@@ -123,15 +126,12 @@ def _lookup_swarm_state_by_correlation_id(cid: str) -> SwarmState | None:
 set_state_provider(_lookup_swarm_state_by_correlation_id)
 
 # Mount the single-entry procurement endpoint
-from swarm.api.procurement import router as _procurement_router
 app.include_router(_procurement_router)
 
 # Mount the deterministic replay / simulation endpoints
-from swarm.api.simulation import router as _simulation_router
 app.include_router(_simulation_router)
 
 # Mount the closed-loop policy learning + promotion endpoints (v1.1 Step 22)
-from swarm.api.policies import router as _policies_router
 app.include_router(_policies_router)
 
 

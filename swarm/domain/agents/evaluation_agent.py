@@ -257,10 +257,9 @@ class EvaluationAgent(BaseAgent):
             if k in ("price_weight", "score_weight", "carbon_weight")
         }
         if weight_overrides:
-            thresholds_override = {
-                k: 0.7
-                for k in ("confidence_threshold", "stability_threshold", "trust_threshold")
-            }
+            thresholds_override = dict.fromkeys(
+                ("confidence_threshold", "stability_threshold", "trust_threshold"), 0.7
+            )
             _, resolved_weights = apply_param_overrides(
                 thresholds_override, clamp_weights(resolved_weights), weight_overrides
             )
