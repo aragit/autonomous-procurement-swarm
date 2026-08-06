@@ -188,7 +188,7 @@ end
 
 API -->|POST /auctions| CoreEngine
 API -->|POST /swarm/requirements| SwarmRuntime
-API -->|GET /swarm/timeline/{id}| TIMELINE
+API -->|GET /swarm/timeline| TIMELINE
 API -->|mount /llm-obs| LLM_OBS
 CoreEngine -->|hash-chained events| LEDGER
 CoreEngine -->|semantic memory| MEM_VEC
