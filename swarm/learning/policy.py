@@ -398,13 +398,27 @@ def generate_candidates(base: Policy) -> list[Policy]:
     for routing in generate_routing_candidates_with_params(base):
         _add(clamp_thresholds(base.thresholds), clamp_weights(base.weights), routing)
 
-    candidates.sort(key=lambda p: p.signature)
-
     # Hard cap on total candidates (Step 25 Hardened).
-    if len(candidates) > MAX_CANDIDATES:
+    # Always preserve the base candidate; sample from the remainder only.
+    base_sig = base.signature
+    base_candidate = next(
+        (c for c in candidates if c.signature == base_sig), None
+    )
+    if base_candidate is None:
+        # The base was filtered out — re-add it so it is never lost.
+        base_candidate = build_policy(
+            clamp_thresholds(base.thresholds),
+            clamp_weights(base.weights),
+            base_strategy,
+        )
+
+    others = [c for c in candidates if c.signature != base_sig]
+    if len(others) >= MAX_CANDIDATES:
         rng = random.Random(CANDIDATE_SAMPLING_SEED)
-        candidates = rng.sample(candidates, MAX_CANDIDATES)
-        candidates.sort(key=lambda p: p.signature)
+        others = rng.sample(others, MAX_CANDIDATES - 1)
+
+    candidates = others + [base_candidate]
+    candidates.sort(key=lambda p: p.signature)
 
     return candidates
 
