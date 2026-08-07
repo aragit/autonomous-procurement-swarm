@@ -223,7 +223,7 @@ class TransformersEngine(BaseLLMEngine):
             torch_dtype="auto",
             device_map=device,
         )
-        self.model.eval()  # type: ignore[no-untyped-call]
+        self.model.eval()
 
         load_time = time.time() - start
         print(f"[LLM] Model loaded in {load_time:.1f}s")
@@ -246,7 +246,7 @@ class TransformersEngine(BaseLLMEngine):
         tokens_in = input_ids.shape[1]
 
         with torch.no_grad():
-            generated_ids = self.model.generate(  # type: ignore[misc]
+            generated_ids = self.model.generate(
                 **model_inputs,
                 max_new_tokens=max_tokens,
                 temperature=temperature,
@@ -255,7 +255,7 @@ class TransformersEngine(BaseLLMEngine):
                 eos_token_id=self.tokenizer.eos_token_id,
             )
 
-        tokens_out = int(generated_ids.shape[1]) - tokens_in  # type: ignore[union-attr]
+        tokens_out = int(generated_ids.shape[1]) - tokens_in
         response = self.tokenizer.decode(generated_ids[0][tokens_in:], skip_special_tokens=True)
         # Tokenizer stubs type decode() as str | list[str]; normalize to str.
         content = response.strip() if isinstance(response, str) else response[0].strip()

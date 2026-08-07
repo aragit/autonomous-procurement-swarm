@@ -42,6 +42,7 @@ jobs:
       
       - name: Type check with mypy
         run: mypy core/ api/ swarm/ examples/ --ignore-missing-imports
+        timeout-minutes: 15
       
       - name: Run tests
         env:

@@ -5,6 +5,7 @@
     Cryptographic audit trails · Enterprise ERP integration · Zero-LLM governance · Offline policy learning
   </p>
   <p align="center">
+    <img src="https://github.com/aragit/autonomous-procurement-swarm/actions/workflows/ci.yml/badge.svg" alt="CI">
     <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python: 3.11+">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
     <img src="https://img.shields.io/badge/status-production--ready-brightgreen" alt="Status: Production-ready">
