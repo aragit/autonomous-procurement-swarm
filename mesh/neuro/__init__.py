@@ -10,6 +10,7 @@ Public API:
     StructuredBackend     abstract backend contract
     NeuralProposal / SymbolicVerdict   shared neuro-symbolic contract types
     ScoutProposal / NegotiatorProposal   schema-constrained output models
+    NegotiationStrategy / StrategyConfig / LinUCBBandit   contextual bandits for strategy selection
 """
 
 from mesh.neuro.backend import (
@@ -17,6 +18,17 @@ from mesh.neuro.backend import (
     MockNeuroBackend,
     OpenAICompatibleBackend,
     StructuredBackend,
+)
+from mesh.neuro.bandits import (
+    DEFAULT_STRATEGIES,
+    BanditContext,
+    LinUCBBandit,
+    NegotiationStrategy,
+    StrategyConfig,
+    compute_reward,
+    get_default_bandit,
+    get_persistent_bandit,
+    save_bandit_state,
 )
 from mesh.neuro.bridge import (
     KernelValidator,
@@ -51,4 +63,13 @@ __all__ = [
     "NegotiatorProposal",
     "NegotiatorQuote",
     "QuoteMetadata",
+    "NegotiationStrategy",
+    "StrategyConfig",
+    "DEFAULT_STRATEGIES",
+    "LinUCBBandit",
+    "BanditContext",
+    "compute_reward",
+    "get_default_bandit",
+    "get_persistent_bandit",
+    "save_bandit_state",
 ]

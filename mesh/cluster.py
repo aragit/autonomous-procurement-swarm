@@ -31,7 +31,7 @@ from mesh.blackboard import (
     shutdown_blackboard,
 )
 from mesh.channels import ChannelType
-from mesh.neuro import LLMConfig
+from mesh.neuro import LLMConfig, save_bandit_state
 
 
 @dataclass
@@ -71,6 +71,9 @@ class MeshConfig:
     # deterministic path.  Defaults to None (deterministic only).
     neuro_llm_config: LLMConfig | None = None
     neuro_max_retries: int = 3
+
+    # Contextual Bandit (Phase 5).  Persistence path for LinUCB state.
+    bandit_state_path: str = "/app/data/bandit_state.json"
 
 
 @dataclass
@@ -130,6 +133,9 @@ class ProcurementCluster:
         """Create all mesh actors and register them."""
         if not self._initialized:
             raise RuntimeError("Cluster not initialized. Call initialize() first.")
+
+        # Set bandit state path for persistent bandit
+        os.environ["BANDIT_STATE_PATH"] = self.config.bandit_state_path
 
         # Create blackboard first (other actors depend on it)
         blackboard = await create_blackboard(self.config.blackboard_name)
@@ -287,11 +293,56 @@ class ProcurementCluster:
                 final_decision = d
                 break
 
+        # Update bandits with reward from decision
+        if final_decision:
+            await self._update_bandits_from_decision(final_decision, requirement)
+
         return {
             "status": "completed",
             "decision": final_decision,
             "buyer_result": decision_result,
         }
+
+    async def _update_bandits_from_decision(
+        self, decision: dict[str, Any], requirement: dict[str, Any]
+    ) -> None:
+        """Update all negotiator bandits with reward from the final decision."""
+        try:
+            # Get the selected supplier from decision
+            decision_payload = decision.get("payload", {})
+            data = decision_payload.get("data", {})
+            selected_supplier = data.get("selected_supplier")
+            if not selected_supplier:
+                return
+
+            # Read the DEAL channel to find the quote for the selected supplier
+            deals = await self._handles.blackboard.read.remote(
+                "kernel", ChannelType.DEAL, limit=20
+            )
+
+            for deal in deals:
+                payload = deal.get("payload", {})
+                if payload.get("type") != "quote":
+                    continue
+                deal_data = payload.get("data", {})
+                if deal_data.get("supplier_id") == selected_supplier:
+                    # Update bandit on each negotiator actor
+                    for negotiator in self._handles.negotiators:
+                        try:
+                            await negotiator.update_bandit_from_decision.remote(
+                                decision=data,
+                                quote=deal_data,
+                                requirement_data=requirement,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "bandit_update_failed",
+                                negotiator=str(negotiator),
+                                error=str(e),
+                            )
+                    break
+        except Exception as e:
+            logger.warning("bandit_update_error", error=str(e))
 
     def get_cluster_info(self) -> dict[str, Any]:
         """Get information about the Ray cluster."""
@@ -321,6 +372,12 @@ class ProcurementCluster:
                 ray.kill(self._handles.kernel)
             await shutdown_blackboard(self.config.blackboard_name)
             self._handles = None
+
+        # Persist bandit state
+        try:
+            await save_bandit_state()
+        except Exception as e:
+            logger.warning("bandit_save_failed", error=str(e))
 
         if ray.is_initialized():
             ray.shutdown()

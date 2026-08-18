@@ -14,10 +14,14 @@ from mesh.actors.base import MeshActor
 from mesh.blackboard import DistributedBlackboard
 from mesh.channels import ChannelType
 from mesh.neuro import (
+    BanditContext,
     LLMConfig,
+    NegotiationStrategy,
     NegotiatorProposal,
     NeuroSymbolicBridge,
     OpenAICompatibleBackend,
+    compute_reward,
+    get_persistent_bandit,
 )
 from mesh.neuro.backend import StructuredBackend
 from mesh.neuro.types import NeuralProposal, SymbolicVerdict
@@ -57,6 +61,10 @@ class NegotiatorActor(MeshActor):
         super().__init__(actor_id, "negotiator", blackboard, kernel)
         self._processed_suppliers: set[tuple[str, str]] = set()  # (correlation_id, supplier_id)
         self._neuro_bridge = neuro_bridge or self._build_neuro_bridge(llm_config, neuro_max_retries)
+        self._bandit = get_persistent_bandit()
+        self._current_strategy: NegotiationStrategy | None = None
+        self._current_context: Any | None = None
+        self._negotiation_rounds = 0
 
     def _build_neuro_bridge(
         self,
@@ -194,6 +202,49 @@ class NegotiatorActor(MeshActor):
                 trace_id=trace_id,
             )
 
+    def _build_bandit_context(
+        self,
+        supplier: dict[str, Any],
+        pool_data: dict[str, Any],
+        requirement_data: dict[str, Any],
+    ) -> BanditContext:
+        """Build context vector for bandit from current negotiation state."""
+        return BanditContext.from_requirement(
+            requirement=requirement_data,
+            supplier=supplier,
+            pool_data=pool_data,
+            round_num=self._negotiation_rounds,
+        )
+
+    def _apply_strategy_hints(
+        self,
+        strategy: NegotiationStrategy,
+        messages: list[dict[str, str]],
+        supplier: dict[str, Any],
+        pool_data: dict[str, Any],
+        requirement_data: dict[str, Any],
+        budget: float | None,
+    ) -> list[dict[str, str]]:
+        """Apply strategy-specific hints to the prompt messages."""
+        from mesh.neuro import DEFAULT_STRATEGIES
+        config = DEFAULT_STRATEGIES[strategy]
+
+        hints = config.to_prompt_hints()
+
+        # Modify the user message with strategy hints
+        strategy_guidance = (
+            f"\n\nNEGOTIATION STRATEGY: {strategy.value}\n"
+            f"- Anchor multiplier: {hints['anchor_multiplier']:.2f}\n"
+            f"- Concession rate: {hints['concession_rate']:.2f} per round\n"
+            f"- Preferred payment terms: {', '.join(hints['preferred_payment_terms'])}\n"
+            f"- Risk tolerance: {hints['risk_tolerance']:.2f}\n"
+            f"- Relationship weight: {hints['relationship_weight']:.2f}\n"
+        )
+
+        enhanced_messages = [msg.copy() for msg in messages]
+        enhanced_messages[-1]["content"] += strategy_guidance
+        return enhanced_messages
+
     async def _neuro_quote(
         self,
         supplier: dict[str, Any],
@@ -211,6 +262,12 @@ class NegotiatorActor(MeshActor):
         bridge = self._neuro_bridge
         if bridge is None:
             return None
+
+        # Build context and select strategy via bandit
+        context = self._build_bandit_context(supplier, pool_data, requirement_data)
+        strategy = self._bandit.select_action(context)
+        self._current_strategy = strategy
+        self._current_context = context
 
         material = str(pool_data.get("material") or "steel")
         quantity = int(pool_data.get("quantity") or 1000)
@@ -239,6 +296,11 @@ class NegotiatorActor(MeshActor):
                 ),
             },
         ]
+
+        # Apply strategy hints to prompt
+        messages = self._apply_strategy_hints(
+            strategy, messages, supplier, pool_data, requirement_data, budget
+        )
 
         def _payload_builder(model: NegotiatorProposal) -> dict[str, Any]:
             return model.to_kernel_payload(material=material, quantity=quantity, budget=budget)
@@ -274,6 +336,49 @@ class NegotiatorActor(MeshActor):
 
         proposal: NegotiatorProposal = result.model_instance  # type: ignore[assignment]
         return proposal.quote.model_dump()
+
+    def update_bandit_from_decision(
+        self,
+        decision: dict[str, Any],
+        quote: dict[str, Any],
+        requirement_data: dict[str, Any],
+    ) -> None:
+        """Update bandit with reward from completed negotiation.
+
+        Called when a deal is awarded (BuyerActor writes DECISION).
+        """
+        if self._current_strategy is None or self._current_context is None:
+            logger.debug(
+                "bandit_update_skipped_no_context",
+                actor_id=self.actor_id,
+            )
+            return
+
+        reward = compute_reward(
+            decision=decision,
+            quote=quote,
+            requirement=requirement_data,
+            negotiation_rounds=self._negotiation_rounds,
+        )
+
+        self._bandit.update(self._current_strategy, self._current_context, reward)
+
+        logger.info(
+            "bandit_updated",
+            actor_id=self.actor_id,
+            strategy=self._current_strategy.value,
+            reward=reward,
+            action_counts=self._bandit.action_counts[self._current_strategy],
+        )
+
+        # Reset for next negotiation
+        self._current_strategy = None
+        self._current_context = None
+        self._negotiation_rounds = 0
+
+    def increment_round(self) -> None:
+        """Increment negotiation round counter."""
+        self._negotiation_rounds += 1
 
     @staticmethod
     def _generate_quote(
