@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import ray
 import structlog
+from ray.actor import ActorHandle
 
 if TYPE_CHECKING:
     from swarm.memory import SupplierMemoryStore
@@ -80,12 +81,12 @@ class MeshConfig:
 class ActorHandles:
     """Container for all mesh actor handles."""
 
-    blackboard: ray.actor.ActorHandle
-    scouts: list[ray.actor.ActorHandle] = field(default_factory=list)
-    evaluators: list[ray.actor.ActorHandle] = field(default_factory=list)
-    negotiators: list[ray.actor.ActorHandle] = field(default_factory=list)
-    buyer: ray.actor.ActorHandle | None = None
-    kernel: ray.actor.ActorHandle | None = None
+    blackboard: ActorHandle[Any]
+    scouts: list[ActorHandle[Any]] = field(default_factory=list)
+    evaluators: list[ActorHandle[Any]] = field(default_factory=list)
+    negotiators: list[ActorHandle[Any]] = field(default_factory=list)
+    buyer: ActorHandle[Any] | None = None
+    kernel: ActorHandle[Any] | None = None
 
 
 class ProcurementCluster:
@@ -126,7 +127,7 @@ class ProcurementCluster:
             if self.config.object_store_memory:
                 init_kwargs["object_store_memory"] = self.config.object_store_memory
 
-        ray.init(**init_kwargs)
+        ray.init(**init_kwargs)  # type: ignore[arg-type]
         self._initialized = True
 
     async def create_actors(self) -> ActorHandles:
@@ -307,6 +308,8 @@ class ProcurementCluster:
         self, decision: dict[str, Any], requirement: dict[str, Any]
     ) -> None:
         """Update all negotiator bandits with reward from the final decision."""
+        if self._handles is None:
+            return
         try:
             # Get the selected supplier from decision
             decision_payload = decision.get("payload", {})
@@ -352,9 +355,9 @@ class ProcurementCluster:
         return {
             "status": "initialized",
             "address": ray.get_runtime_context().gcs_address,
-            "resources": ray.cluster_resources(),
-            "available_resources": ray.available_resources(),
-            "nodes": len(ray.nodes()),
+            "resources": ray.cluster_resources(),  # type: ignore[no-untyped-call]
+            "available_resources": ray.available_resources(),  # type: ignore[no-untyped-call]
+            "nodes": len(ray.nodes()),  # type: ignore[no-untyped-call]
         }
 
     async def shutdown(self) -> None:

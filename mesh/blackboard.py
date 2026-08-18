@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import ray
+from ray.actor import ActorHandle
 
 from mesh.channels import (
     CHANNEL_ACLS,
@@ -234,12 +235,12 @@ class DistributedBlackboard:
 _BLACKBOARD_NAME = "distributed_blackboard"
 
 
-async def create_blackboard(name: str = _BLACKBOARD_NAME) -> ray.actor.ActorHandle:
+async def create_blackboard(name: str = _BLACKBOARD_NAME) -> ActorHandle[Any]:
     """Create and register a named DistributedBlackboard actor."""
-    return DistributedBlackboard.options(name=name).remote()  # type: ignore[attr-defined]
+    return cast(ActorHandle[Any], DistributedBlackboard.options(name=name).remote())  # type: ignore[attr-defined]
 
 
-async def get_blackboard(name: str = _BLACKBOARD_NAME) -> ray.actor.ActorHandle:
+async def get_blackboard(name: str = _BLACKBOARD_NAME) -> ActorHandle[Any]:
     """Get a reference to an existing named DistributedBlackboard actor."""
     return ray.get_actor(name)
 

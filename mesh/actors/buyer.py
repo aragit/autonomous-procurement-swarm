@@ -11,10 +11,10 @@ from typing import Any
 
 import ray
 import structlog
+from ray.actor import ActorHandle
 
 from core.protocol.policy_engine import PolicyEngine
 from mesh.actors.base import MeshActor
-from mesh.blackboard import DistributedBlackboard
 from mesh.channels import ChannelType
 from swarm.domain.governance import STANDARD_POLICY, GovernancePolicy
 
@@ -38,8 +38,8 @@ class BuyerActor(MeshActor):
     def __init__(
         self,
         actor_id: str,
-        blackboard: ray.actor.ActorHandle,
-        kernel: ray.actor.ActorHandle | None = None,
+        blackboard: ActorHandle[Any],
+        kernel: ActorHandle[Any] | None = None,
         policy: GovernancePolicy | None = None,
     ) -> None:
         super().__init__(actor_id, "buyer", blackboard, kernel)
@@ -55,7 +55,7 @@ class BuyerActor(MeshActor):
         }
         self._processed_decisions: set[str] = set()
 
-    async def perceive(self, blackboard: DistributedBlackboard) -> dict[str, Any]:
+    async def perceive(self, blackboard: ActorHandle[Any]) -> dict[str, Any]:
         """Read DEAL, RISK, and SCORE channels for all candidates."""
         deals = await self.read_channel(ChannelType.DEAL, limit=100)
         risks = await self.read_channel(ChannelType.RISK, limit=100)
@@ -212,7 +212,7 @@ class BuyerActor(MeshActor):
 
         return {"proposals": proposals}
 
-    async def act(self, blackboard: DistributedBlackboard, proposal: dict[str, Any]) -> None:
+    async def act(self, blackboard: ActorHandle[Any], proposal: dict[str, Any]) -> None:
         """Write decision to DECISION channel."""
         for prop in proposal.get("proposals", []):
             correlation_id = prop["correlation_id"]

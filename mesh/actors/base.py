@@ -18,8 +18,8 @@ from typing import Any
 
 import ray
 import structlog
+from ray.actor import ActorHandle
 
-from mesh.blackboard import DistributedBlackboard
 from mesh.channels import ChannelType, check_read_permission, check_write_permission
 from mesh.neuro.kernel import symbolic_validate
 from mesh.neuro.types import NeuralProposal, SymbolicVerdict
@@ -86,8 +86,8 @@ class MeshActor(ABC):
         self,
         actor_id: str,
         archetype: str,
-        blackboard: ray.actor.ActorHandle,
-        kernel: ray.actor.ActorHandle | None = None,
+        blackboard: ActorHandle[Any],
+        kernel: ActorHandle[Any] | None = None,
         cognitive_engine: str | None = None,
     ) -> None:
         self.actor_id = actor_id
@@ -99,7 +99,7 @@ class MeshActor(ABC):
         self._errors: list[str] = []
 
     @abstractmethod
-    async def perceive(self, blackboard: DistributedBlackboard) -> dict[str, Any]:
+    async def perceive(self, blackboard: ActorHandle[Any]) -> dict[str, Any]:
         """Read allowed channels and return perception data."""
         ...
 
@@ -109,7 +109,7 @@ class MeshActor(ABC):
         ...
 
     @abstractmethod
-    async def act(self, blackboard: DistributedBlackboard, proposal: dict[str, Any]) -> None:
+    async def act(self, blackboard: ActorHandle[Any], proposal: dict[str, Any]) -> None:
         """Write validated proposal to allowed channels."""
         ...
 

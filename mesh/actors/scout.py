@@ -9,10 +9,10 @@ from typing import Any
 
 import ray
 import structlog
+from ray.actor import ActorHandle
 
 from core.market_simulator import MarketSimulator
 from mesh.actors.base import MeshActor
-from mesh.blackboard import DistributedBlackboard
 from mesh.channels import ChannelType
 from mesh.neuro import (
     LLMConfig,
@@ -95,8 +95,8 @@ class ScoutActor(MeshActor):
     def __init__(
         self,
         actor_id: str,
-        blackboard: ray.actor.ActorHandle,
-        kernel: ray.actor.ActorHandle | None = None,
+        blackboard: ActorHandle[Any],
+        kernel: ActorHandle[Any] | None = None,
         neuro_bridge: NeuroSymbolicBridge | None = None,
         llm_config: LLMConfig | None = None,
         neuro_max_retries: int = 3,
@@ -129,7 +129,7 @@ class ScoutActor(MeshActor):
             raise_on_exhaustion=False,
         )
 
-    async def perceive(self, blackboard: DistributedBlackboard) -> dict[str, Any]:
+    async def perceive(self, blackboard: ActorHandle[Any]) -> dict[str, Any]:
         """Read REQUIREMENT channel for new requirements."""
         traces = await self.read_channel(ChannelType.REQUIREMENT, limit=10)
         return {"requirements": traces}
@@ -189,7 +189,7 @@ class ScoutActor(MeshActor):
 
         return {"proposals": proposals}
 
-    async def act(self, blackboard: DistributedBlackboard, proposal: dict[str, Any]) -> None:
+    async def act(self, blackboard: ActorHandle[Any], proposal: dict[str, Any]) -> None:
         """Write supplier pool to DISCOVERY channel."""
         for prop in proposal.get("proposals", []):
             correlation_id = prop["correlation_id"]

@@ -9,12 +9,12 @@ from typing import Any, cast
 
 import ray
 import structlog
+from ray.actor import ActorHandle
 
 from configs.settings import settings
 from core.evaluator.scoring import EvaluationWeights, MultiCriteriaEvaluator
 from core.protocol.schema import BidPayload
 from mesh.actors.base import MeshActor
-from mesh.blackboard import DistributedBlackboard
 from mesh.channels import ChannelType
 from swarm.domain.pricing import (
     DEFAULT_BID_BOND_PCT,
@@ -46,8 +46,8 @@ class EvaluatorActor(MeshActor):
     def __init__(
         self,
         actor_id: str,
-        blackboard: ray.actor.ActorHandle,
-        kernel: ray.actor.ActorHandle | None = None,
+        blackboard: ActorHandle[Any],
+        kernel: ActorHandle[Any] | None = None,
         memory: SupplierMemoryStore | None = None,
     ) -> None:
         super().__init__(actor_id, "evaluator", blackboard, kernel)
@@ -62,7 +62,7 @@ class EvaluatorActor(MeshActor):
         self._memory = memory
         self._processed_suppliers: set[tuple[str, str]] = set()  # (correlation_id, supplier_id)
 
-    async def perceive(self, blackboard: DistributedBlackboard) -> dict[str, Any]:
+    async def perceive(self, blackboard: ActorHandle[Any]) -> dict[str, Any]:
         """Read DISCOVERY channel for new supplier discoveries."""
         traces = await self.read_channel(ChannelType.DISCOVERY, limit=50)
         return {"discoveries": traces}
@@ -170,7 +170,7 @@ class EvaluatorActor(MeshActor):
 
         return {"proposals": proposals}
 
-    async def act(self, blackboard: DistributedBlackboard, proposal: dict[str, Any]) -> None:
+    async def act(self, blackboard: ActorHandle[Any], proposal: dict[str, Any]) -> None:
         """Write evaluation to SCORE channel and risk to RISK channel."""
         for prop in proposal.get("proposals", []):
             correlation_id = prop["correlation_id"]

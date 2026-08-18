@@ -9,9 +9,9 @@ from typing import Any, cast
 
 import ray
 import structlog
+from ray.actor import ActorHandle
 
 from mesh.actors.base import MeshActor
-from mesh.blackboard import DistributedBlackboard
 from mesh.channels import ChannelType
 from mesh.neuro import (
     BanditContext,
@@ -52,8 +52,8 @@ class NegotiatorActor(MeshActor):
     def __init__(
         self,
         actor_id: str,
-        blackboard: ray.actor.ActorHandle,
-        kernel: ray.actor.ActorHandle | None = None,
+        blackboard: ActorHandle[Any],
+        kernel: ActorHandle[Any] | None = None,
         neuro_bridge: NeuroSymbolicBridge | None = None,
         llm_config: LLMConfig | None = None,
         neuro_max_retries: int = 3,
@@ -86,7 +86,7 @@ class NegotiatorActor(MeshActor):
             raise_on_exhaustion=False,
         )
 
-    async def perceive(self, blackboard: DistributedBlackboard) -> dict[str, Any]:
+    async def perceive(self, blackboard: ActorHandle[Any]) -> dict[str, Any]:
         """Read SCORE channel for evaluated suppliers."""
         score_traces = await self.read_channel(ChannelType.SCORE, limit=50)
         return {"evaluations": score_traces}
@@ -174,7 +174,7 @@ class NegotiatorActor(MeshActor):
 
         return {"proposals": proposals}
 
-    async def act(self, blackboard: DistributedBlackboard, proposal: dict[str, Any]) -> None:
+    async def act(self, blackboard: ActorHandle[Any], proposal: dict[str, Any]) -> None:
         """Write quote to DEAL channel."""
         for prop in proposal.get("proposals", []):
             correlation_id = prop["correlation_id"]
