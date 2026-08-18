@@ -254,8 +254,8 @@ class LinUCBBandit:
         self.b[action] += reward * x
 
         # Recompute inverse and theta
-        self.A_inv[action] = np.linalg.inv(self.A[action])
-        self.theta[action] = self.A_inv[action] @ self.b[action]
+        self.A_inv[action] = np.linalg.inv(self.A[action]).astype(np.float32)
+        self.theta[action] = (self.A_inv[action] @ self.b[action]).astype(np.float32)
 
         # Update statistics
         self.action_counts[action] += 1
@@ -310,8 +310,8 @@ class LinUCBBandit:
         for a in strategies:
             bandit.A[a] = np.array(state["A"][a.value], dtype=np.float32)
             bandit.b[a] = np.array(state["b"][a.value], dtype=np.float32)
-            bandit.A_inv[a] = np.linalg.inv(bandit.A[a])
-            bandit.theta[a] = bandit.A_inv[a] @ bandit.b[a]
+            bandit.A_inv[a] = np.linalg.inv(bandit.A[a]).astype(np.float32)
+            bandit.theta[a] = (bandit.A_inv[a] @ bandit.b[a]).astype(np.float32)
             bandit.action_counts[a] = state["action_counts"][a.value]
             bandit.total_rewards[a] = state["total_rewards"][a.value]
 
