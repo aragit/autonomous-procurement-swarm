@@ -99,9 +99,9 @@ async def test_scout_uses_neuro_bridge_and_writes_llm_pool():
         # The LLM-supplied supplier id is present (neuro path was used).
         assert any(s["supplier_id"] == "LLM_Scout_S1" for s in pool_suppliers)
 
-        ray.kill(scout)
+        ray.kill(scout, no_restart=True)
     finally:
-        ray.kill(kernel, require_alive=False)
+        ray.kill(kernel, no_restart=True)
         ray.shutdown()
 
 
@@ -151,9 +151,9 @@ async def test_scout_falls_back_when_neuro_exhausted():
             "PremiumSteel_E",
         }
 
-        ray.kill(scout)
+        ray.kill(scout, no_restart=True)
     finally:
-        ray.kill(kernel, require_alive=False)
+        ray.kill(kernel, no_restart=True)
         ray.shutdown()
 
 
@@ -220,16 +220,18 @@ async def test_negotiator_uses_neuro_quote_with_correction():
         deals = await bb.read.remote("buyer", ChannelType.DEAL, limit=20)
         quote_entries = [d for d in deals if d.get("payload", {}).get("type") == "quote"]
         assert len(quote_entries) == 5
-        # Backend was invoked twice (re-prompted after the budget rejection).
-        assert backend.call_count == 2
-        # The written quote must be the corrected price.
+        # The written quote must be the corrected price (the second backend
+        # response).  Since the backend lives inside the Ray actor process we
+        # cannot inspect ``backend.call_count`` directly; instead we verify the
+        # retry happened by confirming the corrected (in-budget) quote was
+        # actually written to the DEAL channel.
         written = {
             d["payload"]["data"]["supplier_id"]: d["payload"]["data"]["price"]
             for d in quote_entries
         }
         assert written["MinerCorp_A"] == 135.0
 
-        ray.kill(negotiator)
+        ray.kill(negotiator, no_restart=True)
     finally:
-        ray.kill(kernel, require_alive=False)
+        ray.kill(kernel, no_restart=True)
         ray.shutdown()

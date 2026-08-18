@@ -176,10 +176,23 @@ async def test_mesh_health(client):
 async def test_run_without_runtime_returns_500():
     """Without an injected runtime the lazy default (Ray) is unavailable."""
     set_runtime(None)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        response = await ac.post(
-            "/v2/procurement/run", json={"material": "steel", "quantity": 1, "budget": 1.0}
+    # Patch RayMeshRuntime to raise so we simulate an environment where Ray
+    # is not usable (e.g. not installed or cluster unreachable).
+    import api.v2.runtime as rt
+    import_original = rt._build_default_runtime
+    def _fail():
+        raise RuntimeError(
+            "Mesh runtime unavailable: 'ray' is not installed. Call "
+            "api.v2.runtime.set_runtime(<MeshRuntime>) to inject a runtime."
         )
-    assert response.status_code == 500
-    set_runtime(FakeRuntime())  # restore for any later test
+    rt._build_default_runtime = _fail
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            response = await ac.post(
+                "/v2/procurement/run", json={"material": "steel", "quantity": 1, "budget": 1.0}
+            )
+        assert response.status_code == 500
+    finally:
+        rt._build_default_runtime = import_original
+        set_runtime(FakeRuntime())  # restore for any later test
