@@ -65,11 +65,11 @@ def _build_default_runtime() -> MeshRuntime:
     """
     try:
         return RayMeshRuntime()
-    except Exception:
+    except Exception as exc:
         raise RuntimeError(
             "Mesh runtime unavailable: 'ray' is not installed. Call "
             "api.v2.runtime.set_runtime(<MeshRuntime>) to inject a runtime."
-        )
+        ) from exc
 
 
 def get_runtime() -> MeshRuntime:
