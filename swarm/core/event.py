@@ -1,22 +1,37 @@
 """Event model and event bus for the swarm runtime.
 
+.. deprecated::
+    Use :mod:`mesh.channels` and :mod:`mesh.blackboard` (V2 mesh runtime)
+    instead. The EventBus and Event model are preserved here for backward
+    compatibility with existing tests and downstream consumers.
+
 Events announce facts (e.g. ``supplier_search_requested``) and travel through
 the bus. The bus is fully async so it can support future messaging patterns
 (request/response, fan-out, durable queues) without changing the event model.
 """
 
-import asyncio
-from collections import defaultdict
-from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
-from enum import StrEnum
-from typing import Any, Literal
-from uuid import uuid4
+import warnings
 
-import structlog
-from pydantic import BaseModel, Field
+warnings.warn(
+    "swarm.core.event is deprecated. Use mesh.channels and mesh.blackboard "
+    "(V2 mesh runtime) instead. For the legacy implementation, import from "
+    "legacy.event directly.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-from swarm.core.message import Message
+import asyncio  # noqa: E402
+from collections import defaultdict  # noqa: E402
+from collections.abc import Awaitable, Callable  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
+from enum import StrEnum  # noqa: E402
+from typing import Any, Literal  # noqa: E402
+from uuid import uuid4  # noqa: E402
+
+import structlog  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+
+from swarm.core.message import Message  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 

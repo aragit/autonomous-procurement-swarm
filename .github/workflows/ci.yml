@@ -35,13 +35,13 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install -e ".[dev]"
+          pip install -e ".[dev,ray]"
       
       - name: Lint with ruff
-        run: ruff check core/ api/ swarm/ examples/ tests/ scripts/
+        run: ruff check core/ api/ swarm/ examples/ tests/ scripts/ mesh/ legacy/
       
       - name: Type check with mypy
-        run: mypy core/ api/ swarm/ examples/ --ignore-missing-imports
+        run: mypy core/ api/ swarm/ examples/ mesh/ legacy/ --ignore-missing-imports
         timeout-minutes: 15
       
       - name: Run tests

@@ -1,5 +1,10 @@
 """Swarm runtime core — reusable primitives for autonomous multi-agent swarms.
 
+.. deprecated::
+    Use :mod:`mesh.channels` and :mod:`mesh.blackboard` (V2 mesh runtime)
+    instead. This module provides the V1 agent primitives, event bus, shared
+    state, and orchestration utilities.
+
 Provides the foundation for future agents to communicate without direct
 coupling:
 
@@ -14,19 +19,29 @@ coupling:
 - :class:`Swarm` — minimal orchestration layer tying the primitives together
 """
 
-from collections.abc import Callable, Iterable
-from typing import Any
-from uuid import uuid4
+import warnings
 
-import structlog
+warnings.warn(
+    "swarm.core is deprecated. Use the mesh package (V2 mesh runtime) "
+    "for new development. For the legacy implementation, import from "
+    "the 'legacy' package.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-from swarm.core.agent import AgentStatus, BaseAgent, drive_on_event, route_on_event
-from swarm.core.artifact import Artifact
-from swarm.core.capability import Capability, to_capability
-from swarm.core.event import ANY_EVENT, Event, EventBus, EventHandler, SwarmEventType
-from swarm.core.message import Message
-from swarm.core.registry import AgentRegistry
-from swarm.core.state import SwarmState
+from collections.abc import Callable, Iterable  # noqa: E402
+from typing import Any  # noqa: E402
+from uuid import uuid4  # noqa: E402
+
+import structlog  # noqa: E402
+
+from swarm.core.agent import AgentStatus, BaseAgent, drive_on_event, route_on_event  # noqa: E402
+from swarm.core.artifact import Artifact  # noqa: E402
+from swarm.core.capability import Capability, to_capability  # noqa: E402
+from swarm.core.event import ANY_EVENT, Event, EventBus, EventHandler, SwarmEventType  # noqa: E402
+from swarm.core.message import Message  # noqa: E402
+from swarm.core.registry import AgentRegistry  # noqa: E402
+from swarm.core.state import SwarmState  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 

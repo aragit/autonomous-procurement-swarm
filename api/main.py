@@ -1,34 +1,56 @@
-"""FastAPI control plane for autonomous procurement swarm."""
+"""FastAPI control plane for autonomous procurement swarm.
 
-import os
-import uuid
-from contextlib import asynccontextmanager
-from typing import Any
+.. deprecated::
+    Use the V2 mesh API (``api.v2:app``) for new development. The V1 endpoints
+    at ``/swarm/*`` and ``/auctions/*`` remain available but are no longer the
+    recommended integration path. The V2 runtime provides the same capabilities
+    through a distributed Ray mesh with typed blackboard channels.
+"""
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
-from pydantic import BaseModel, Field, field_validator
+import warnings
 
-from configs.settings import settings
-from core.agents.buyer import BuyerOrchestrator
-from core.agents.supplier import CostModel, SupplierAgent
-from core.evaluator.scoring import EvaluationWeights, MultiCriteriaEvaluator
-from core.ledger.repository import PostgresLedgerRepository
-from core.llm_engine import LLMEngineFactory
-from core.logging_config import configure_logging, get_logger
-from core.market_simulator import MarketSimulator
-from core.memory.heuristics import HeuristicReservationEstimator
-from core.memory.semantic import PgVectorMemoryStore
-from core.protocol.auction_orchestrator import AuctionOrchestrator
-from core.protocol.policy_engine import PolicyContext, PolicyEngine
-from swarm import SwarmState
-from swarm.api.policies import router as _policies_router
-from swarm.api.procurement import router as _procurement_router
-from swarm.api.simulation import router as _simulation_router
-from swarm.api.strategy import app as llm_observability_app
-from swarm.api.strategy import set_state_provider
-from swarm.core.timeline import build_timeline
-from swarm.domain.agents import ApprovalAgent, ExecutionTrackingAgent, PurchaseOrderAgent
-from swarm.domain.artifacts import (
+warnings.warn(
+    "api.main (V1 control plane) is deprecated. Use api.v2:app (V2 mesh runtime) "
+    "for new development. The V1 endpoints at /swarm/* and /auctions/* remain "
+    "available but may be removed in a future major release.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+import os  # noqa: E402
+import uuid  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+from typing import Any  # noqa: E402
+
+from fastapi import BackgroundTasks, FastAPI, HTTPException  # noqa: E402
+from pydantic import BaseModel, Field, field_validator  # noqa: E402
+
+from api.v2 import router as _v2_mesh_router  # noqa: E402
+from configs.settings import settings  # noqa: E402
+from core.agents.buyer import BuyerOrchestrator  # noqa: E402
+from core.agents.supplier import CostModel, SupplierAgent  # noqa: E402
+from core.evaluator.scoring import EvaluationWeights, MultiCriteriaEvaluator  # noqa: E402
+from core.ledger.repository import PostgresLedgerRepository  # noqa: E402
+from core.llm_engine import LLMEngineFactory  # noqa: E402
+from core.logging_config import configure_logging, get_logger  # noqa: E402
+from core.market_simulator import MarketSimulator  # noqa: E402
+from core.memory.heuristics import HeuristicReservationEstimator  # noqa: E402
+from core.memory.semantic import PgVectorMemoryStore  # noqa: E402
+from core.protocol.auction_orchestrator import AuctionOrchestrator  # noqa: E402
+from core.protocol.policy_engine import PolicyContext, PolicyEngine  # noqa: E402
+from swarm import SwarmState  # noqa: E402
+from swarm.api.policies import router as _policies_router  # noqa: E402
+from swarm.api.procurement import router as _procurement_router  # noqa: E402
+from swarm.api.simulation import router as _simulation_router  # noqa: E402
+from swarm.api.strategy import app as llm_observability_app  # noqa: E402
+from swarm.api.strategy import set_state_provider  # noqa: E402
+from swarm.core.timeline import build_timeline  # noqa: E402
+from swarm.domain.agents import (  # noqa: E402
+    ApprovalAgent,
+    ExecutionTrackingAgent,
+    PurchaseOrderAgent,
+)
+from swarm.domain.artifacts import (  # noqa: E402
     EXECUTION_AUTHORIZATION_ARTIFACT_NAME,
     EXECUTION_STATUS_ARTIFACT_NAME,
     EXTERNAL_CALL_ARTIFACT_NAME,
@@ -36,19 +58,19 @@ from swarm.domain.artifacts import (
     PURCHASE_ORDER_ARTIFACT_NAME,
     RISK_ASSESSMENT_ARTIFACT_NAME,
 )
-from swarm.domain.events import (
+from swarm.domain.events import (  # noqa: E402
     CREATE_REQUIREMENT_INTENT,
     RECORD_OUTCOME_INTENT,
 )
-from swarm.domain.wiring import build_procurement_swarm
-from swarm.integrations import (
+from swarm.domain.wiring import build_procurement_swarm  # noqa: E402
+from swarm.integrations import (  # noqa: E402
     PROVIDERS,
     BaseConnector,
     ConnectorConfig,
     build_connector,
     build_connector_from_env,
 )
-from swarm.memory import default_store
+from swarm.memory import default_store  # noqa: E402
 
 # Configure logging at import time
 configure_logging()
@@ -133,6 +155,9 @@ app.include_router(_simulation_router)
 
 # Mount the closed-loop policy learning + promotion endpoints (v1.1 Step 22)
 app.include_router(_policies_router)
+
+# Mount the v2 (Mesh Runtime) API — Ray-backed procurement, separate namespace.
+app.include_router(_v2_mesh_router)
 
 
 class AuctionRequest(BaseModel):

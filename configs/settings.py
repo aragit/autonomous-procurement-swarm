@@ -1,10 +1,10 @@
 """Application settings loaded from YAML and environment variables."""
 
 from pathlib import Path
-from typing import List, Dict
+
+import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import yaml
 
 _BASE_YAML_PATH = Path(__file__).parent / "base.yaml"
 
@@ -18,7 +18,7 @@ class LLMSettings(BaseSettings):
 
 class MarketSettings(BaseSettings):
     seed: int = 42
-    materials: List[str] = Field(default_factory=lambda: [
+    materials: list[str] = Field(default_factory=lambda: [
         "steel", "aluminum", "copper", "plastic", "lumber", "rubber"
     ])
     shock_lambda: float = 0.05
@@ -26,10 +26,10 @@ class MarketSettings(BaseSettings):
 
 class NegotiationSettings(BaseSettings):
     max_turns: int = 6
-    valid_materials: List[str] = Field(default_factory=lambda: [
+    valid_materials: list[str] = Field(default_factory=lambda: [
         "steel", "aluminum", "copper", "plastic", "lumber", "rubber"
     ])
-    valid_payment_terms: List[str] = Field(default_factory=lambda: [
+    valid_payment_terms: list[str] = Field(default_factory=lambda: [
         "net_30", "net_60", "cod", "letter_of_credit"
     ])
 
@@ -49,7 +49,7 @@ class AgentSettings(BaseSettings):
 class EvaluationSettings(BaseSettings):
     pareto_plot_path: str = "data/pareto.png"
     ledger_dir: str = "data"
-    esg_baselines: Dict[str, float] = Field(default_factory=lambda: {
+    esg_baselines: dict[str, float] = Field(default_factory=lambda: {
         "steel": 1800.0,
         "aluminum": 12000.0,
         "copper": 3000.0,
@@ -57,7 +57,7 @@ class EvaluationSettings(BaseSettings):
         "lumber": 200.0,
         "rubber": 2800.0,
     })
-    scoring_weights: Dict[str, float] = Field(default_factory=lambda: {
+    scoring_weights: dict[str, float] = Field(default_factory=lambda: {
         "price": 0.40,
         "lead_time": 0.25,
         "esg": 0.20,

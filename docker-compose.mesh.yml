@@ -1,0 +1,90 @@
+version: "3.8"
+
+services:
+  ray-head:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: procurement-swarm:mesh
+    environment:
+      MESH_ROLE: head
+      RAY_ADDRESS: auto
+      MESH_N_SCOUTS: "3"
+      MESH_N_EVALUATORS: "3"
+      MESH_N_NEGOTIATORS: "2"
+    command: ["--role", "head"]
+    hostname: ray-head
+    ports:
+      - "8265:8265"   # Ray dashboard
+      - "6379:6379"   # Ray GCS
+      - "10001:10001" # Ray object store
+    healthcheck:
+      test: ["CMD", "python", "-c", "import ray; ray.init(address='auto'); ray.shutdown()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ray-worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: procurement-swarm:mesh
+    environment:
+      MESH_ROLE: worker
+      RAY_ADDRESS: "ray://ray-head:10001"
+      MESH_N_SCOUTS: "2"
+      MESH_N_EVALUATORS: "2"
+    command: ["--role", "worker"]
+    depends_on:
+      ray-head:
+        condition: service_healthy
+
+  ray-worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: procurement-swarm:mesh
+    environment:
+      MESH_ROLE: worker
+      RAY_ADDRESS: "ray://ray-head:10001"
+      MESH_N_SCOUTS: "1"
+      MESH_N_EVALUATORS: "1"
+    command: ["--role", "worker"]
+    depends_on:
+      ray-head:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: procurement-swarm:mesh
+    environment:
+      MESH_ROLE: api
+      RAY_ADDRESS: "ray://ray-head:10001"
+      LOG_LEVEL: info
+      # Neuro backend (optional LLM) — leave enable_neuro=false by default
+      # Set to http://ollama:11434/v1 to enable neuro-symbolic bridge.
+      NEURO_LLM_BASE_URL: "http://ollama:11434/v1"
+      NEURO_LLM_MODEL: "gemma-2b-it"
+    command: ["--role", "api"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      ray-head:
+        condition: service_healthy
+
+  # ─── Optional inference backend (neuro-symbolic bridge) ───────────────────
+  # Ollama provides open-weight models (Gemma/Qwen) for the NeuroSymbolicBridge.
+  # Start with:  docker compose -f docker-compose.mesh.yml up --build -d
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    # Note: run `docker compose exec ollama ollama pull gemma-2b-it` after startup
+
+volumes:
+  ollama-data:
+  vllm-models:

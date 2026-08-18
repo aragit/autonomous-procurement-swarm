@@ -1,16 +1,32 @@
-"""Central coordinator for the swarm runtime."""
+"""Central coordinator for the swarm runtime.
 
-from collections.abc import Callable, Iterable
-from typing import Any
-from uuid import uuid4
+.. deprecated::
+    Use :class:`mesh.cluster.ProcurementCluster` (V2 mesh runtime) instead.
+    The SwarmCoordinator is preserved here for backward compatibility with
+    existing tests and downstream consumers.
+"""
 
-import structlog
+import warnings
 
-from swarm.core.agent import BaseAgent, drive_on_event, route_on_event
-from swarm.core.event import ANY_EVENT, Event, EventBus, EventHandler, SwarmEventType
-from swarm.core.message import Message
-from swarm.core.registry import AgentRegistry
-from swarm.core.state import SwarmState
+warnings.warn(
+    "swarm.orchestration.coordinator is deprecated. Use "
+    "mesh.cluster.ProcurementCluster (V2 mesh runtime) instead. For the "
+    "legacy implementation, import from legacy.coordinator directly.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+from collections.abc import Callable, Iterable  # noqa: E402
+from typing import Any  # noqa: E402
+from uuid import uuid4  # noqa: E402
+
+import structlog  # noqa: E402
+
+from swarm.core.agent import BaseAgent, drive_on_event, route_on_event  # noqa: E402
+from swarm.core.event import ANY_EVENT, Event, EventBus, EventHandler, SwarmEventType  # noqa: E402
+from swarm.core.message import Message  # noqa: E402
+from swarm.core.registry import AgentRegistry  # noqa: E402
+from swarm.core.state import SwarmState  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 

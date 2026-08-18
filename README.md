@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
     <img src="https://img.shields.io/badge/status-production--ready-brightgreen" alt="Status: Production-ready">
     <img src="https://img.shields.io/badge/tests-47%2B%20unit-brightgreen" alt="Tests: 47+ unit + integration">
-    <img src="https://img.shields.io/badge/version-v0.8.2--unreleased-orange" alt="Version">
+    <img src="https://img.shields.io/badge/version-v2.0.0--rc1-orange" alt="Version">
   </p>
 </p>
 
@@ -66,7 +66,84 @@
 
 The orchestration runtime (colloquially "the swarm") is the **primary execution path** for new work. The core auction engine remains available for backward-compatible sealed-bid auctions and as the LLM-powered bid-generation backend.
 
-### What Makes This Different
+### V2: Distributed Neuro-Symbolic Mesh
+
+> **v2.0.0-rc1** introduces a distributed Ray mesh runtime alongside the existing deterministic swarm. The V2 mesh scales horizontally across multiple nodes with a **typed blackboard** (capability-scoped ACLs), **elastic actor pools** (Scout, Evaluator, Negotiator, Buyer), and an optional **NeuroSymbolicBridge** for schema-constrained LLM generation validated by a singleton SafetyKernelActor.
+
+**Key V2 components:**
+
+| Component | Path | Description |
+|---|---|---|
+| **DistributedBlackboard** | `mesh/blackboard.py` | Ray actor with typed channels (`REQUIREMENT`, `DISCOVERY`, `SCORE`, `RISK`, `DEAL`, `DECISION`) |
+| **Channel ACLs** | `mesh/channels.py` | Capability-scoped read/write permissions per channel |
+| **ScoutActor** | `mesh/actors/scout.py` | Elastic pool: reads `REQUIREMENT` → writes `DISCOVERY` |
+| **EvaluatorActor** | `mesh/actors/evaluator.py` | Elastic pool: reads `DISCOVERY` → writes `SCORE`, `RISK` |
+| **NegotiatorActor** | `mesh/actors/negotiator.py` | Elastic pool: reads `SCORE` → writes `DEAL` |
+| **BuyerActor** | `mesh/actors/buyer.py` | Singleton: reads `DEAL`/`RISK`/`SCORE` → writes `DECISION` (deterministic MCDA) |
+| **SafetyKernelActor** | `mesh/actors/base.py` | Singleton: validates all neural proposals, enforces budgets/policies |
+| **NeuroSymbolicBridge** | `mesh/neuro/bridge.py` | Retry loop: LLM generates → kernel validates → auto-correct or fallback |
+| **ProcurementCluster** | `mesh/cluster.py` | Ray cluster lifecycle (head/worker) with elastic actor scaling |
+
+**Signal path:** `REQUIREMENT` → ScoutActor → `DISCOVERY` → EvaluatorActor → `SCORE`/`RISK` → NegotiatorActor → `DEAL` → BuyerActor → `DECISION`
+
+> **Full architecture and diagrams:** See [`docs/v2_mesh_architecture.md`](docs/v2_mesh_architecture.md) for complete lifecycle, ACL matrix, neuro-symbolic bridge flow, and API reference.
+
+### Quick Start: Distributed Mesh (Docker)
+
+```bash
+# Start the full Ray mesh + FastAPI v2 server
+docker compose -f docker-compose.mesh.yml up --build
+
+# API is available at http://localhost:8000
+# Ray Dashboard at http://localhost:8265
+```
+
+```bash
+# Submit a procurement requirement to the mesh
+curl -X POST http://localhost:8000/v2/procurement/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "material": "steel",
+    "quantity": 1000,
+    "budget": 500000,
+    "target_lead_time_days": 30,
+    "enable_neuro": false
+  }'
+
+# Check status (blackboard snapshot + stats)
+curl http://localhost:8000/v2/procurement/RUN-XXXXXXXXXXXX/status
+```
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `MESH_ROLE` | `api` | Container role: `head`, `worker`, or `api` |
+| `MESH_N_SCOUTS` | `3` | Number of Scout actors |
+| `MESH_N_EVALUATORS` | `3` | Number of Evaluator actors |
+| `MESH_N_NEGOTIATORS` | `2` | Number of Negotiator actors |
+| `RAY_ADDRESS` | — | Ray cluster address |
+| `NEURO_LLM_BASE_URL` | — | LLM endpoint for neuro-symbolic bridge |
+| `NEURO_LLM_MODEL` | `gemma-2b-it` | LLM model name |
+
+### Deprecation: V1 asyncio Runtime
+
+The original V1 asyncio runtime (`swarm.core.EventBus`, `swarm.orchestration.SwarmCoordinator`, `api.main:app`) is **deprecated** and preserved in the `legacy/` package. New code should use the V2 mesh runtime (`mesh/` package + `api.v2`).
+
+```python
+# V1 (deprecated) — still works, emits DeprecationWarning
+from swarm.core.event import EventBus
+from swarm.orchestration.coordinator import SwarmCoordinator
+from api.main import app
+
+# V2 (recommended)
+from mesh.cluster import ProcurementCluster, MeshConfig
+from api.v2 import app  # api.v2:app
+```
+
+---
+
+## V2 Mesh Architecture
 
 | Aspect | Traditional Procurement SaaS | This System |
 |---|---|---|
@@ -891,7 +968,20 @@ The production Dockerfile excludes PyTorch by default. Change to `pip install -e
 
 ## Changelog
 
-### [Unreleased] — Adaptive Intelligence Layer (Steps 20–25)
+### [v2.0.0-rc1] — Distributed Neuro-Symbolic Mesh
+
+- **Ray Mesh Runtime**: Distributed blackboard (Ray actor) with capability-scoped ACLs for 6 typed channels (`REQUIREMENT`, `DISCOVERY`, `SCORE`, `RISK`, `DEAL`, `DECISION`)
+- **Four Elastic Agent Archetypes**: ScoutActor, EvaluatorActor, NegotiatorActor (all elastic), BuyerActor (singleton MCDA)
+- **SafetyKernelActor**: Singleton symbolic validator that enforces budget clamping, lead-time bounds, ESG material whitelist, and payment term policy on all neural proposals
+- **NeuroSymbolicBridge**: Retry loop — LLM generates schema-constrained proposals → kernel validates → auto-correct on failure → deterministic fallback after `neuro_max_retries` (default 3)
+- **V2 API**: `POST /v2/procurement/run`, `GET /v2/procurement/{trace_id}/status`, `GET /v2/procurement/health`
+- **Docker Mesh Deployment**: Multi-stage Dockerfile with `mesh.entrypoint` supporting head/worker/api/legacy roles; `docker-compose.mesh.yml` with Ray head + 2 workers + FastAPI v2 + Ray Dashboard
+- **V1 Deprecation**: Original asyncio runtime moved to `legacy/` package; emits `DeprecationWarning` on import; fully backward-compatible
+- **Signal path verified**: `REQUIREMENT → DISCOVERY → SCORE/RISK → DEAL → DECISION`
+
+### [v1.0.0] — Deprecated (moved to legacy/)
+
+
 
 - **Policy Learning**: Offline replay-based candidate generation and evaluation from historical traces + feedback
 - **Adaptive Routing** (Step 24): Context-aware strategy selection via routing rules with priority-based conflict resolution
@@ -901,7 +991,7 @@ The production Dockerfile excludes PyTorch by default. Change to `pip install -e
 - **Safety Validation**: Zero-delta rejection, total delta cap (0.15), MAX_PARAMS_PER_RULE=2 enforcement
 - **47+ unit tests** covering all adaptive intelligence components
 
-### [Unreleased] — Runtime Configuration & Governance Hardening
+### [v1.0.0-unreleased] — Adaptive Intelligence Layer (Steps 20–25)
 
 - **Connector Factory**: `ConnectorConfig` + `build_connector()` for runtime-selectable ERP adapters (mock → supplier_api → sap / oracle / coupa)
 - **Contract Pre-Gate Hardening**: `ContractValidationAgent` is a hard gate — `ContractRejected` → REJECTED governance with no risk assessment, no PO, no execution

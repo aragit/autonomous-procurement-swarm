@@ -12,5 +12,6 @@ venv/
 .gitignore
 Dockerfile
 docker-compose.yml
+docker-compose.mesh.yml
 *.md
 !README.md
