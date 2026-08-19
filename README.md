@@ -27,7 +27,7 @@
 - [Overview](#overview)
   - [Business Use Case Perspective](#business-use-case-perspective)
   - [Technical Summary](#technical-summary)
-- [Mesh Architecture](#mesh-architecture)
+- [System Architecture & 7-Layer Topology](#system-architecture--7-layer-topology)
 - [Specialized Agent Archetypes & Swarm Collaboration](#specialized-agent-archetypes--swarm-collaboration)
 - [Key Architectural Advantages & Emergent Capabilities](#key-architectural-advantages--emergent-capabilities)
 - [Design Philosophy](#design-philosophy)
@@ -65,69 +65,91 @@ The platform operates as a distributed Ray actor mesh structured around a typed,
 
 ---
 
-## Mesh Architecture
+## System Architecture & 7-Layer Topology
 
-
-**Distributed Blackboard** — `DistributedBlackboard` (Ray actor) provides typed channels with capability-scoped ACLs:
-
-```
-
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                          DISTRIBUTED BLACKBOARD (Ray Actor)                             │
-│                      [Append-Only Traces | Capability-Scoped ACLs]                      │
-└──────┬───────────────────────┬─────────────────────────┬─────────────────────────┬──────┘
-       │ REQUIREMENT           │ DISCOVERY               │ SCORE / RISK            │ DEAL
-       ▼                       ▼                         ▼                         ▼
-┌──────────────┐        ┌──────────────┐         ┌──────────────┐          ┌──────────────┐
-│  ScoutActor  │        │EvaluatorActor│         │NegotiatorActor│         │  BuyerActor  │
-│    (Pool)    │        │    (Pool)    │         │     (Pool)   │          │ (Singleton)  │
-└──────┬───────┘        └──────┬───────┘         └───────┬──────┘          └───────┬──────┘
-       │                       │                         │                         │
-       │                       │                         ▼ (Strategy Selection)    │
-       │                       │                  ┌──────────────┐                 │
-       │                       │                  │ LinUCBBandit │                 │
-       │                       │                  └──────────────┘                 │
-       │                       ▼                         │                         │ (No LLM)
-       │              (Deterministic MCDA)               │                         │
-       │                                                 │                         │
-       └─────────────────────────┬───────────────────────┘                         │
-                                  ▼                                                 ▼
-                       ┌─────────────────────┐                          ┌──────────────────────┐
-                       │ NeuroSymbolicBridge │                          │      DECISION        │
-                       └──────────┬──────────┘                          │ (Deterministic MCDA) │
-                                  ▼                                     └──────────────────────┘
-                       ┌─────────────────────┐
-                       │  SafetyKernelActor  │ 
-                       │ (OPA/Rego Policies) │
-                       └─────────────────────┘
+The platform operates across 7 integrated operational layers driven by a Ray actor swarm and a neuro-symbolic governance kernel:
 
 ```
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│  LAYER 1: PHYSICAL DISTRIBUTION & CLUSTER SUBSTRATE (Ray Cluster + Docker Sidecars)         │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────┐ │
+│  │   Ray    │   │ Postgres │   │  Redis   │   │   OPA    │   │   vLLM   │   │ Ray Workers  │ │
+│  │ Head:6379│   │  :5432   │   │  :6379   │   │  :8181   │   │  :8000   │   │ (Actor Pool) │ │
+│  │ Dashboard│   │procure_db│   │ Pub/Sub  │   │ sidecar  │   │  (GPU)   │   │              │ │
+│  └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────────┘ │
+└──────────────────────────────────────────────┬───────────────────────────────────────────────┘
+                                               │ Provisioned Substrate
+                                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│  LAYER 2: API GATEWAY & AUCTION CONTROLLER (FastAPI Ingestion)                               │
+│  • POST /api/v1/auction/submit → 202 Accepted (<40ms) → Enqueues RFQ to DistributedBlackboard│
+│  • GET  /api/v1/auction/{auction_id}/stream → Listens to Redis Pub/Sub SSE channel           │
+└──────────────────────────────────────────────┬───────────────────────────────────────────────┘
+                                               │ Ingest Requirement
+                                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│  LAYER 3: ASYNC SWARM EXECUTION CORE (Ray Actor Mesh & Stigmergic Blackboard)                │
+│  • Shared State: DistributedBlackboard (Ray Actor with Capability-Scoped ACLs)              │
+│  • Stigmergic Flow:                                                                          │
+│    REQUIREMENT → DISCOVERY → SCORE / RISK → DEAL → POLICY_VERIFY → DECISION → REWARD         │
+└───────────────┬──────────────────────────────┬──────────────────────────────┬────────────────┘
+                │                              │                              │
+                │ Tool & LLM Invocations       │ State & Audit Writes         │ Publish Progress
+                ▼                              ▼                              ▼
+┌──────────────────────────────┐┌──────────────────────────────┐┌──────────────────────────────┐
+│ LAYER 4: MODEL & BANDIT LAYER││ LAYER 5: DUAL STORAGE LAYER  ││ LAYER 6: REAL-TIME EVENTS    │
+│ • vLLM (GPU) / Ollama (CPU)  ││ • Postgres: procure_audit &  ││ • Redis Pub/Sub channel      │
+│ • LinUCBBandit Strategy      ││   auction_ledgers            ││   broadcasts channel state   │
+│ • Web Search / Scraper Pool  ││ • Plasma: Shared Memory DAG  ││   to Layer 2 SSE streams     │
+└──────────────────────────────┘└──────────────────────────────┘└──────────────────────────────┘
+                                               │
+                                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│  LAYER 7: OBSERVABILITY, GOVERNANCE & POLICY KERNEL                                          │
+│  • SafetyKernelActor: OPA Rego policy enforcement for all neural deal proposals              │
+│  • OpenTelemetry tracing | Structured JSON Audit Ledger | Ray Dashboard (:8265)              │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
-| Channel | Description |
-|---|---|
-| `REQUIREMENT` | Purchase requirements ingested |
-| `DISCOVERY` | Supplier discovery results (parallel ScoutActor pool) |
-| `SCORE` | Multi-criteria evaluation scores (parallel EvaluatorActor pool) |
-| `RISK` | Financial, delivery, quality, carbon risk metrics |
-| `DEAL` | Schema-constrained quotes (parallel NegotiatorActor pool + LinUCB) |
-| `DECISION` | Winning award from centralized BuyerActor (deterministic MCDA) |
+### Live System Health Verification
 
-**Signal path:** `REQUIREMENT → DISCOVERY → SCORE/RISK → DEAL → DECISION → REWARD`
+After launching infrastructure via Docker Compose and Ray, verify layer connectivity and health:
 
-### 🗺️ Component Map
+```bash
+# Layer 1: Container & Ray Cluster status
+docker compose -f docker/docker-compose.yml ps
+ray status
 
-| Component | Path | Description |
-|---|---|---|
-| **DistributedBlackboard** | `mesh/blackboard.py` | Ray actor with typed channels (`REQUIREMENT`, `DISCOVERY`, `SCORE`, `RISK`, `DEAL`, `DECISION`) |
-| **Channel ACLs** | `mesh/channels.py` | Capability-scoped read/write permissions per channel |
-| **ScoutActor** | `mesh/actors/scout.py` | Elastic pool: reads `REQUIREMENT` → writes `DISCOVERY` |
-| **EvaluatorActor** | `mesh/actors/evaluator.py` | Elastic pool: reads `DISCOVERY` → writes `SCORE`, `RISK` |
-| **NegotiatorActor** | `mesh/actors/negotiator.py` | Elastic pool: reads `SCORE` → writes `DEAL` with LinUCB strategy selection |
-| **BuyerActor** | `mesh/actors/buyer.py` | Singleton: reads `DEAL`/`RISK`/`SCORE` → writes `DECISION` (deterministic MCDA) |
-| **SafetyKernelActor** | `mesh/actors/base.py` | Singleton: validates all neural proposals via OPA/Rego rules |
-| **NeuroSymbolicBridge** | `mesh/neuro/bridge.py` | Retry loop: LLM generates → kernel validates → auto-correct or fallback |
-| **LinUCBBandit** | `mesh/neuro/bandits.py` | Online contextual bandit for adaptive negotiation strategy selection |
-| **ProcurementCluster** | `mesh/cluster.py` | Ray cluster lifecycle (head/worker) with elastic actor scaling + persistence |
+# Layer 2: API Gateway Health (sub-50ms response)
+curl -s http://localhost:8000/health
+# {"status":"healthy","service":"procurement-swarm","ray_connected":true,"opa_sidecar":true,"llm_backend":"http_vllm"}
+
+# Layer 2: Submit Procurement RFQ (202 Accepted)
+curl -s -X POST http://localhost:8000/api/v1/auction/submit \
+  -H "Content-Type: application/json" \
+  -d '{"item_id":"GPU-H100-80GB","quantity":16,"target_price_usd":30000,"max_lead_days":14}'
+# {"auction_id":"auc-8f92b1a","status":"queued"}
+
+# Layer 6: Real-time SSE channel trace stream
+curl -N http://localhost:8000/api/v1/auction/auc-8f92b1a/stream
+
+# Layer 7: OPA Policy Kernel check
+curl -s http://localhost:8181/v1/data/procurement/allow
+```
+
+### Pipeline DAG & Actor Topology
+
+| Stage / Channel | Actor / Component | Execution Target | Primary Tool / Engine | Fallback / Safety Mechanism |
+|---|---|---|---|---|
+| REQUIREMENT | GatewayController | FastAPI Ingestion | JSON Schema Validator | Reject malformed payload (400 Bad Request) |
+| DISCOVERY | ScoutActor | Ray Worker Pool | Web Scraping / Supplier APIs | Fallback to cached local supplier registry |
+| SCORE / RISK | EvaluatorActor | Ray Worker Pool | MCDA Scoring Vector + ESG Model | Heuristic rule-based risk baseline |
+| DEAL | NegotiatorActor | Ray Worker Pool | LinUCBBandit + vLLM Proposal Engine | Static baseline discount strategy |
+| POLICY_VERIFY | SafetyKernelActor | OPA Sidecar (:8181) | Rego Policy Verification Engine | POLICY_REJECT flag → Force re-negotiation |
+| DECISION | BuyerActor | Ray Singleton Actor | Zero-LLM Deterministic MCDA Math | Pause execution → Escalate to HITL Queue |
+| REWARD | BanditLearner | Async Background Loop | LinUCB Matrix Update (r_t) | Skip update on noisy/corrupted score emission |
+
+Every state transition and artifact emitted to `DistributedBlackboard` is checkpointed asynchronously to `procure_audit.traces`. If a Ray worker node crashes mid-auction, a replacement actor reconstitutes state directly from the append-only trace log and resumes execution at the unhandled channel event without restarting the pipeline.
 
 ---
 
