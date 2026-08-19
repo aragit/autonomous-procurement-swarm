@@ -151,26 +151,7 @@ The runtime relies on five specialized Ray actor archetypes. Rather than sending
 
 Agent interaction is fully decoupled and event-driven:
 
-```
-┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-│   ScoutActor    │       │ EvaluatorActor  │       │ NegotiatorActor │       │   BuyerActor    │
-└────────┬────────┘       └────────┬────────┘       └────────┬────────┘       └────────┬────────┘
-         │                         │                         │                         │
-         │ Appends DISCOVERY       │                         │                         │
-         ▼                         │                         │                         │
-┌──────────────────────────────────┴─────────────────────────┴─────────────────────────┴─────────┐
-│                                  DISTRIBUTED BLACKBOARD                                 │
-│  [REQUIREMENT] ──► [DISCOVERY] ──► [SCORE & RISK] ──► [DEAL] ──► [DECISION] ──► [REWARD]      │
-└──────────────────────────────────┬─────────────────────────┬─────────────────────────┬─────────┘
-         │                         │                         │
-         │ Reads DISCOVERY         │ Reads SCORE             │ Reads DEAL, RISK
-         └────────────────────────►│                         │
-         │ Appends DEAL            │                         │
-         └────────────────────────►│                         │
-         │ Computes MCDA
-         ▼
-[Award Decision]
-```
+![Swarm Architecture Diagram](assets/swarm.png)
 
 1. **Capability-Scoped ACLs:** Cross-agent communication is governed by tokenized read/write capabilities assigned to specific channels (`REQUIREMENT`, `DISCOVERY`, `SCORE`, `RISK`, `DEAL`, `DECISION`).
 2. **Immutable Artifact Lineage (DAG):** Each emitted artifact includes `parent_ids` pointing to its precursor artifacts, maintaining a complete lineage graph on the blackboard from initial requirement to final decision.
