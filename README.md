@@ -9,6 +9,14 @@
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
     <img src="https://img.shields.io/badge/version-v2.1.0-brightgreen" alt="Version: v2.1.0">
     <img src="https://img.shields.io/badge/tests-200%2B%20unit%2C%20mesh%2C%20integration-brightgreen" alt="Tests: 200+ unit + mesh + integration">
+    <img src="https://img.shields.io/badge/ray-2.55%2B-06B7AC" alt="Ray">
+    <img src="https://img.shields.io/badge/FastAPI-0.110%2B-009700?logo=fastapi&logoColor=white" alt="FastAPI">
+    <img src="https://img.shields.io/badge/pydantic-v2-7B3FBF?logo=pydantic&logoColor=white" alt="Pydantic v2">
+    <img src="https://img.shields.io/badge/PostgreSQL-16%2B-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL">
+    <img src="https://img.shields.io/badge/NumPy-1.24%2B-01326D?logo=numpy&logoColor=white" alt="NumPy">
+    <img src="https://img.shields.io/badge/SciPy-1.10%2B-8C4A9F?logo=scipy&logoColor=white" alt="SciPy">
+    <img src="https://img.shields.io/badge/OPA%2FRego-policy%20as%20code-00AEA9" alt="OPA/Rego policy-as-code">
+    <img src="https://img.shields.io/badge/LinUCB-contextual%20bandits-FE8003" alt="LinUCB contextual bandits">
   </p>
 </p>
 
