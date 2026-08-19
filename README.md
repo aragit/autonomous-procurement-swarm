@@ -44,7 +44,7 @@
 
 **Autonomous Procurement Swarm** is a distributed neuro-symbolic system for autonomous procurement negotiations. The V2 runtime is built on a Ray actor mesh with a typed blackboard, capability-scoped communication, OPA/Rego policy enforcement, and LinUCB contextual bandits for adaptive strategy selection.
 
-### Architecture Transition
+### 🔄 Architecture Transition
 
 The system has evolved from a single-process `asyncio` engine into a distributed Ray actor mesh:
 
@@ -120,7 +120,7 @@ The system has evolved from a single-process `asyncio` engine into a distributed
 
 
 
-### Component Map
+### 🗺️ Component Map
 
 | Component | Path | Description |
 |---|---|---|
@@ -155,7 +155,7 @@ The system has evolved from a single-process `asyncio` engine into a distributed
 
 Phase 5 introduces **Online Policy Learning** with LinUCB (Linear Upper Confidence Bound) contextual bandits for adaptive negotiation strategy selection in `NegotiatorActor`.
 
-### Context Vector ($x_t \in \mathbb{R}^6$)
+### 📐 Context Vector ($x_t \in \mathbb{R}^6$)
 
 | Component | Description | Normal Range |
 |---|---|---|
@@ -166,7 +166,7 @@ Phase 5 introduces **Online Policy Learning** with LinUCB (Linear Upper Confiden
 | Historical win rate | Supplier past award success | [0, 1] |
 | Negotiation round | Current round index | Normalized |
 
-### Discrete Action Space
+### 🎮 Discrete Action Space
 
 | Strategy | Description |
 |---|---|
@@ -176,7 +176,7 @@ Phase 5 introduces **Online Policy Learning** with LinUCB (Linear Upper Confiden
 | `RISK_AWARE_PACING` | Slower concessions, emphasizing risk metrics |
 | `RELATIONSHIP_BUILDING` | Prioritize trust-building for long-term partnerships |
 
-### Closed-Loop Reward ($r_t$)
+### 🏆 Closed-Loop Reward ($r_t$)
 
 | Component | Weight | Description |
 |---|---|---|
@@ -205,13 +205,13 @@ The V2 distributed mesh executes a 6-phase procurement lifecycle:
 
 ## Quick Start
 
-### Prerequisites
+### 📋 Prerequisites
 
 - Python 3.11+
 - Docker & Docker Compose
 - 4GB free RAM (Ray cluster + API)
 
-### Start the V2 Distributed Mesh
+### 🚀 Start the V2 Distributed Mesh
 
 ```bash
 # Clone and spin up Ray cluster + API v2 + Ray Dashboard
@@ -222,7 +222,7 @@ docker compose -f docker-compose.mesh.yml up -d
 - API v2: `http://localhost:8000`
 - Ray Dashboard: `http://localhost:8265`
 
-### Submit a Procurement Run
+### 📤 Submit a Procurement Run
 
 ```bash
 curl -X POST http://localhost:8000/v2/procurement/run \
@@ -236,7 +236,7 @@ curl -X POST http://localhost:8000/v2/procurement/run \
   }'
 ```
 
-### Check Status
+### 🔍 Check Status
 
 ```bash
 # Blackboard snapshot + stats
@@ -246,13 +246,13 @@ curl http://localhost:8000/v2/procurement/{trace_id}/status
 curl http://localhost:8000/v2/procurement/health
 ```
 
-### Run Benchmark Verification
+### 📊 Run Benchmark Verification
 
 ```bash
 python scripts/benchmark_mesh.py
 ```
 
-### Environment Variables
+### ⚙️ Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
@@ -287,7 +287,7 @@ All configuration is managed via `configs/mesh.yaml` and environment variables.
 
 Interactive docs: [Swagger UI](http://localhost:8000/docs) and [ReDoc](http://localhost:8000/redoc).
 
-### V2 Distributed Mesh Endpoints
+### 🌐 V2 Distributed Mesh Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -296,7 +296,7 @@ Interactive docs: [Swagger UI](http://localhost:8000/docs) and [ReDoc](http://lo
 | `GET` | `/v2/procurement/{trace_id}/timeline` | Causally ordered timeline |
 | `GET` | `/v2/procurement/health` | Cluster health check |
 
-### V2 Procurement Run
+### 🏃 V2 Procurement Run
 
 **Request:**
 
@@ -342,7 +342,7 @@ The project maintains a full test pyramid on a single `pytest` runner
 (`test_suite.sh`) and a mesh smoke benchmark (`scripts/benchmark_mesh.py`)
 guard the full signal path.
 
-### Test Suite Overview
+### 🧪 Test Suite Overview
 
 | Layer | Directory | Files | Scope |
 |---|---|---|---|
@@ -352,7 +352,7 @@ guard the full signal path.
 
 Total: **74 test files / ~820 test functions**, split 59 unit / 10 integration / 5 mesh.
 
-### Running Tests
+### ▶️ Running Tests
 
 ```bash
 # Full suite (requires Postgres on 5433 for integration tests)
@@ -375,7 +375,7 @@ pytest tests/ --cov=core --cov=api --cov=mesh --cov-report=term --cov-report=htm
 > environment. Tests that require a live Ray cluster are exercised via Docker
 > Compose and the benchmark script, not the headless CI job.
 
-### CI/CD Pipeline
+### 🔄 CI/CD Pipeline
 
 `.github/workflows/ci.yml` runs on every `push` and `pull_request` to `main`.
 A `pgvector/pgvector:pg16` service is exposed on port **`5433`**
@@ -391,7 +391,7 @@ Both lint and type-check sweep **all** runtime packages (`core`, `api`, `swarm`,
 `mesh`, `legacy`, `examples`, `scripts`), so the Ray mesh and the legacy engine
 share the same quality bar.
 
-### End-to-End Verification
+### ✅ End-to-End Verification
 
 `test_suite.sh` is a terminal integration suite that hits the running HTTP API
 on `http://localhost:8000` (start the stack with `docker compose up -d`). It is
@@ -410,7 +410,7 @@ split into two phases:
 ./test_suite.sh        # exit 0 = all assertions passed
 ```
 
-### Mesh Benchmark
+### 📈 Mesh Benchmark
 
 `scripts/benchmark_mesh.py` validates the **V2** distributed mesh end-to-end
 against a live Docker Compose mesh deployment. It posts a requirement to
@@ -430,7 +430,7 @@ python scripts/benchmark_mesh.py        # exit 0 = all phases verified
 
 ## Security
 
-### Current Protections
+### 🛡️ Current Protections
 
 1. **Input validation** — Pydantic v2 schemas reject malformed requests (HTTP 422)
 2. **Material whitelist** — Only configured commodities are accepted
@@ -441,7 +441,7 @@ python scripts/benchmark_mesh.py        # exit 0 = all phases verified
 7. **Hash chain integrity** — All artifacts carry parentage for auditability
 8. **Neuro-symbolic bounding** — All LLM proposals must pass OPA/Rego validation before entering the blackboard
 
-### OPA/Rego Policy Rules
+### 📜 OPA/Rego Policy Rules
 
 Safety policies are defined as Rego files in `/app/policies/`:
 
@@ -458,7 +458,7 @@ See `SECURITY.md` for responsible disclosure policy.
 
 ## Changelog
 
-### [v2.1.0] — Contextual Bandits & Adaptive Negotiation Mesh
+### 🏷️ [v2.1.0] — Contextual Bandits & Adaptive Negotiation Mesh
 
 - **LinUCB Contextual Bandits**: Online policy learning in `NegotiatorActor` with 6-dimensional context vectors and 5 discrete strategy profiles
 - **Strategy-Guided Negotiation**: `NegotiatorActor` selects negotiation strategy via `bandit.select_action()` and injects strategy hints into LLM prompts
@@ -467,7 +467,7 @@ See `SECURITY.md` for responsible disclosure policy.
 - **Cold-Start Fallback**: Uniform exploration with tie-breaking noise when no history exists
 - **Context Normalization**: Urgency, budget margin, supplier rating, material complexity, historical win rate, negotiation round
 
-### [v2.0.0-rc1] — Distributed Neuro-Symbolic Mesh
+### 🏷️ [v2.0.0-rc1] — Distributed Neuro-Symbolic Mesh
 
 - **Ray Mesh Runtime**: Distributed blackboard (Ray actor) with capability-scoped ACLs for 6 typed channels (`REQUIREMENT`, `DISCOVERY`, `SCORE`, `RISK`, `DEAL`, `DECISION`)
 - **Four Elastic Agent Archetypes**: ScoutActor, EvaluatorActor, NegotiatorActor (all elastic), BuyerActor (singleton MCDA)
