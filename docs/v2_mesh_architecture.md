@@ -20,8 +20,8 @@ with an auto-correction retry loop and a deterministic fallback.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                           API GATEWAY (FastAPI v2)                        │
-│  POST /v2/procurement/run   GET /v2/procurement/{trace_id}/status       │
+│                           API GATEWAY (FastAPI v2)                       │
+│  POST /v2/procurement/run   GET /v2/procurement/{trace_id}/status        │
 └────────────────────────────────┬─────────────────────────────────────────┘
                                  │
                   ┌──────────────▼──────────────┐
@@ -30,23 +30,23 @@ with an auto-correction retry loop and a deterministic fallback.
                   │  Lazily connects to Ray     │
                   └──────────────┬──────────────┘
                                  │
-    ┌────────────────────────────┼─────────────────────────────────┐
-    │  Ray Head Node (:8265)     │                                 │
-    │                           │                                 │
-    │  ┌──────────────────────┐ │  ┌─────────────────────────────┐ │
-    │  │ DistributedBlackboard│ │  │ SafetyKernelActor (singleton)│ │
-    │  │  (mesh/blackboard.py)│ │  │  (mesh/actors/base.py)       │ │
-    │  └──────────┬───────────┘ │  └─────────────┬───────────────┘ │
+    ┌────────────────────────────┼──────────────────────────────── ─┐
+    │  Ray Head Node (:8265)     │                                  │
+    │                            │                                  │
+    │  ┌──────────────────────┐  │  ┌─────────────────────────────┐ │
+    │  │ DistributedBlackboard│  │  │SafetyKernelActor (singleton)│ │
+    │  │  (mesh/blackboard.py)│  │  │ (mesh/actors/base.py)       │ │
+    │  └──────────┬───────────┘  │  └─────────────┬───────────────┘ │
     │             │              │                │                 │
     │  ┌──────────▼──────────┐   │  ┌─────────────▼───────────────┐ │
     │  │   Channel ACLs      │   │  │  Symbolic Validation        │ │
     │  │ (mesh/channels.py)  │   │  │  - Budget clamping          │ │
     │  └─────────────────────┘   │  │  - Lead-time bounds         │ │
-    │                             │  │  - ESG material whitelist   │ │
-    │                             │  │  - Payment term whitelist   │ │
-    │                             │  │  - Policy enforcement       │ │
-    │                             │  └─────────────┬───────────────┘ │
-    │                             │                │                 │
+    │                            │  │  - ESG material whitelist   │ │
+    │                            │  │  - Payment term whitelist   │ │
+    │                            │  │  - Policy enforcement       │ │
+    │                            │  └─────────────┬───────────────┘ │
+    │                            │                │                 │
     │  ┌──────────┬──────────┬───┐ │  ┌─────────────▼───────────────┐ │
     │  │  Scout   │Evaluator │   │ │  │ Neuro-Symbolic Bridge       │ │
     │  │  Actors  │ Actors   │   │ │  │  (mesh/neuro/)              │ │
@@ -57,11 +57,11 @@ with an auto-correction retry loop and a deterministic fallback.
     │  ┌──────────┬──────────┬────────┐ │                              │
     │  │Negotiator│  Buyer   │        │ │                              │
     │  │  Actors  │  Actor   │        │ │                              │
-    │  │ (N,      │ (singleton)      │ │                              │
-    │  │ elastic) │                 │ │                              │
+    │  │ (N,      │ (singleton)       │ │                              │
+    │  │ elastic) │                   │ │                              │
     │  └──────────┴──────────┴────────┘ │                              │
     └──────────────────────────────────────────────────────────────────┘
-          │          │          │
+           │          │          │
    Channel │          │          │
    Flow    ▼          ▼          ▼
   REQUIREMENT → DISCOVERY → SCORE/RISK → DEAL → DECISION
