@@ -28,6 +28,7 @@
   - [Business Use Case Perspective](#business-use-case-perspective)
   - [Technical Summary](#technical-summary)
 - [Mesh Architecture](#mesh-architecture)
+- [Specialized Agent Archetypes & Swarm Collaboration](#specialized-agent-archetypes--swarm-collaboration)
 - [Key Architectural Advantages & Emergent Capabilities](#key-architectural-advantages--emergent-capabilities)
 - [Design Philosophy](#design-philosophy)
 - [Adaptive Intelligence Layer (LinUCB Bandits)](#adaptive-intelligence-layer-linucb-bandits)
@@ -127,6 +128,61 @@ The platform operates as a distributed Ray actor mesh structured around a typed,
 | **NeuroSymbolicBridge** | `mesh/neuro/bridge.py` | Retry loop: LLM generates → kernel validates → auto-correct or fallback |
 | **LinUCBBandit** | `mesh/neuro/bandits.py` | Online contextual bandit for adaptive negotiation strategy selection |
 | **ProcurementCluster** | `mesh/cluster.py` | Ray cluster lifecycle (head/worker) with elastic actor scaling + persistence |
+
+---
+
+## Specialized Agent Archetypes & Swarm Collaboration
+
+The runtime relies on five specialized Ray actor archetypes. Rather than sending direct point-to-point messages, agents collaborate asynchronously and stigmergically through the `DistributedBlackboard`.
+
+### 🤖 Specialized Agent Archetypes
+
+| Agent Archetype | Pool Strategy | Primary Input | Primary Output | Core Functionality |
+|---|---|---|---|---|
+| **`ScoutActor`** | Elastic Pool | `REQUIREMENT` | `DISCOVERY` | Ingests sourcing requests and executes parallel multi-supplier discovery and qualification. |
+| **`EvaluatorActor`** | Elastic Pool | `DISCOVERY` | `SCORE`, `RISK` | Computes multi-criteria score vectors and evaluates financial, delivery, quality, and ESG risk metrics. |
+| **`NegotiatorActor`** | Elastic Pool | `SCORE` | `DEAL` | Executes adaptive quote negotiations using `LinUCBBandit` strategy selection and schema-constrained LLM/SLM generation. |
+| **`BuyerActor`** | Centralized Singleton | `DEAL`, `SCORE`, `RISK` | `DECISION` | Calculates final contract award using deterministic Multi-Criteria Decision Analysis (MCDA) — zero LLMs in decision path. |
+| **`SafetyKernelActor`** | Centralized Singleton | Neural `DEAL` Proposal | Verified `DEAL` | Enforces symbolic OPA/Rego policy rules (budget limits, lead-time bounds, material whitelists). |
+
+---
+
+### 🔄 Decoupled Stigmergic Collaboration Protocol
+
+Agent interaction is fully decoupled and event-driven:
+
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│   ScoutActor    │       │ EvaluatorActor  │       │ NegotiatorActor │       │   BuyerActor    │
+└────────┬────────┘       └────────┬────────┘       └────────┬────────┘       └────────┬────────┘
+         │                         │                         │                         │
+         │ Appends DISCOVERY       │                         │                         │
+         ▼                         │                         │                         │
+┌──────────────────────────────────┴─────────────────────────┴─────────────────────────┴─────────┐
+│                                  DISTRIBUTED BLACKBOARD                                 │
+│  [REQUIREMENT] ──► [DISCOVERY] ──► [SCORE & RISK] ──► [DEAL] ──► [DECISION] ──► [REWARD]      │
+└──────────────────────────────────┬─────────────────────────┬─────────────────────────┬─────────┘
+         │                         │                         │
+         │ Reads DISCOVERY         │ Reads SCORE             │ Reads DEAL, RISK
+         └────────────────────────►│                         │
+         │ Appends DEAL            │                         │
+         └────────────────────────►│                         │
+         │ Computes MCDA
+         ▼
+[Award Decision]
+```
+
+1. **Capability-Scoped ACLs:** Cross-agent communication is governed by tokenized read/write capabilities assigned to specific channels (`REQUIREMENT`, `DISCOVERY`, `SCORE`, `RISK`, `DEAL`, `DECISION`).
+2. **Immutable Artifact Lineage (DAG):** Each emitted artifact includes `parent_ids` pointing to its precursor artifacts, maintaining a complete lineage graph on the blackboard from initial requirement to final decision.
+3. **Asynchronous Feedback Loops:** When `BuyerActor` emits a `DECISION`, the award metric is transformed into a scalar reward ($r_t$) and broadcast back to update `NegotiatorActor` bandit parameters asynchronously without blocking execution.
+
+---
+
+### 🧩 Relationship with Core Architectural Components
+
+* **`DistributedBlackboard` Integration:** All agent state transitions are written to the blackboard actor as immutable, append-only traces.
+* **`SafetyKernelActor` & `NeuroSymbolicBridge` Bounding:** Before `NegotiatorActor` can post a candidate quote to the `DEAL` channel, `NeuroSymbolicBridge` routes the proposal through `SafetyKernelActor`. Non-compliant quotes are automatically auto-corrected or rejected via Rego rules before reaching the blackboard.
+* **`LinUCBBandit` Integration:** `NegotiatorActor` queries `LinUCBBandit` during the `DEAL` phase to select contextual strategy profiles (`AGGRESSIVE_ANCHOR`, `PAYMENT_TERMS_TRADE_OFF`, etc.) based on real-time market vectors.
 
 ---
 
