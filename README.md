@@ -484,12 +484,27 @@ See `SECURITY.md` for responsible disclosure policy.
 Fork the repository → Create a feature branch → Install dev dependencies → Run quality checks → Submit a Pull Request.
 
 ```bash
+# Create a feature branch
 git checkout -b feature/your-feature
-pip install -e ".[dev]"
-ruff check mesh/ tests/
-mypy mesh/ --ignore-missing-imports
-pytest tests/mesh/ -v
+
+# Install dev + Ray dependencies (as CI does)
+pip install -e ".[dev,ray]"
+
+# Lint — all packages, exactly as CI runs
+ruff check core/ api/ swarm/ examples/ tests/ scripts/ mesh/ legacy/
+
+# Type check — all runtime packages, exactly as CI runs
+mypy core/ api/ swarm/ examples/ mesh/ legacy/ --ignore-missing-imports
+
+# Full test suite (unit + mesh + integration)
+pytest tests/ -v
 ```
+
+> These commands mirror `.github/workflows/ci.yml`, which runs ruff + mypy over
+> every package and the full `pytest tests/` suite against a
+> `pgvector/pgvector:pg16` service on port **5433**
+> (`DATABASE_URL=postgresql+asyncpg://procurement:procurement@localhost:5433/procurement`).
+> Start the stack with `docker compose up -d` before running integration tests.
 
 ## Citation
 
