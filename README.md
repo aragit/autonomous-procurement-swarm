@@ -56,9 +56,6 @@ The system has evolved from a single-process `asyncio` engine into a distributed
 
 ## V2 Mesh Architecture
 
-<p align="center">
-  <img src="assets/d_mesh.png" alt="V2 Mesh Architecture" width="100%">
-</p>
 
 **Distributed Blackboard** — `DistributedBlackboard` (Ray actor) provides typed channels with capability-scoped ACLs:
 
@@ -74,6 +71,44 @@ The system has evolved from a single-process `asyncio` engine into a distributed
 **Signal path:** `REQUIREMENT → DISCOVERY → SCORE/RISK → DEAL → DECISION → REWARD`
 
 **Full architecture and diagrams:** See [`docs/v2_mesh_architecture.md`](docs/v2_mesh_architecture.md) for complete lifecycle, ACL matrix, neuro-symbolic bridge flow, and API reference.
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                          DISTRIBUTED BLACKBOARD (Ray Actor)                             │
+│                      [Append-Only Traces | Capability-Scoped ACLs]                      │
+└──────┬───────────────────────┬─────────────────────────┬─────────────────────────┬──────┘
+       │ REQUIREMENT           │ DISCOVERY               │ SCORE / RISK            │ DEAL
+       ▼                       ▼                         ▼                         ▼
+┌──────────────┐        ┌──────────────┐         ┌──────────────┐          ┌──────────────┐
+│  ScoutActor  │        │EvaluatorActor│         │NegotiatorActor│         │  BuyerActor  │
+│    (Pool)    │        │    (Pool)    │         │     (Pool)   │          │ (Singleton)  │
+└──────┬───────┘        └──────┬───────┘         └───────┬──────┘          └───────┬──────┘
+       │                       │                         │                         │
+       │                       │                         ▼ (Strategy Selection)    │
+       │                       │                  ┌──────────────┐                 │
+       │                       │                  │ LinUCBBandit │                 │
+       │                       │                  └──────────────┘                 │
+       │                       ▼                         │                         │ (No LLM)
+       │              (Deterministic MCDA)               │                         │
+       │                                                 │                         │
+       └─────────────────────────┬───────────────────────┘                         │
+                                 ▼                                                 ▼
+                      ┌─────────────────────┐                          ┌──────────────────────┐
+                      │ NeuroSymbolicBridge │                          │      DECISION        │
+                      └──────────┬──────────┘                          │ (Deterministic MCDA) │
+                                 ▼                                     └──────────────────────┘
+                      ┌─────────────────────┐
+                      │  SafetyKernelActor  │ 
+                      │ (OPA/Rego Policies) │
+                      └─────────────────────┘
+
+
+
+
+
+
+
+
+
 
 ### Component Map
 
