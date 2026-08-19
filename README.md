@@ -156,7 +156,7 @@ The platform operates as a distributed Ray actor mesh structured around a typed,
 
 ## Adaptive Intelligence Layer (LinUCB Bandits)
 
-Phase 5 introduces **Online Policy Learning** with LinUCB (Linear Upper Confidence Bound) contextual bandits for adaptive negotiation strategy selection in `NegotiatorActor`.
+The system utilizes **Online Policy Learning** with LinUCB (Linear Upper Confidence Bound) contextual bandits for adaptive negotiation strategy selection in `NegotiatorActor`.
 
 ### 📐 Context Vector ($x_t \in \mathbb{R}^6$)
 
