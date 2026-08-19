@@ -435,6 +435,28 @@ mypy mesh/ --ignore-missing-imports
 pytest tests/mesh/ -v
 ```
 
+## Citation
+
+If you use the Autonomous Procurement Swarm in your work, we'd appreciate a citation.
+The canonical citation metadata lives in [`CITATION.cff`](CITATION.cff) (CFF 1.2.0);
+GitHub also renders a **Cite this repository** button from it (APA, BibTeX, etc.).
+
+For v2.1.0 (the distributed Ray mesh runtime), the BibTeX entry is:
+
+```bibtex
+@software{procurement_swarm_v210,
+  author       = {{Autonomous Procurement Swarm}},
+  title        = {Autonomous Procurement Swarm},
+  version      = {v2.1.0},
+  year         = {2026},
+  month        = aug,
+  url          = {https://github.com/aragit/autonomous-procurement-swarm},
+  note         = {Distributed neuro-symbolic multi-agent mesh with LinUCB contextual bandits}
+}
+```
+
+Please cite the specific tagged release you build on rather than the repository HEAD.
+
 ## License
 
 Distributed under the MIT License. See `LICENSE` for details.

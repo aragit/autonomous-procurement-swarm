@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as described in CITATION.cff."
+repository-code: https://github.com/aragit/autonomous-procurement-swarm
+type: software
+license: MIT
+title: Autonomous Procurement Swarm
+version: 2.1.0
+date-released: 2026-08-19
+description: "Agentic e-procurement auction platform with multi-criteria scoring"
+keywords:
+  - procurement
+  - multi-agent
+  - ray
+  - distributed
+  - mesh
+  - neuro-symbolic
+  - opa-rego
+  - linucb
+  - bandits
+authors:
+  - family-names: Swarm
+    given-names: Autonomous Procurement
+    alias: https://github.com/aragit
