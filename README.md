@@ -70,7 +70,7 @@ The system has evolved from a single-process `asyncio` engine into a distributed
 
 **Signal path:** `REQUIREMENT → DISCOVERY → SCORE/RISK → DEAL → DECISION → REWARD`
 
-**Full architecture and diagrams:** See [`docs/v2_mesh_architecture.md`](docs/v2_mesh_architecture.md) for complete lifecycle, ACL matrix, neuro-symbolic bridge flow, and API reference.
+
 
 ```
 
@@ -192,9 +192,6 @@ The V2 distributed mesh executes a 6-phase procurement lifecycle:
 5. **`DECISION`** — Centralized `BuyerActor` executes deterministic MCDA math and selects winning award.
 6. **`REWARD`** — Decision listener feeds scalar rewards back to update bandit parameters for future rounds.
 
-<p align="center">
-  <img src="assets/d_lifecycle.png" alt="V2 Procurement Lifecycle" width="100%">
-</p>
 
 ---
 
