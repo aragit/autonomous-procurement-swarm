@@ -28,7 +28,7 @@
 - [V2 Mesh Architecture](#v2-mesh-architecture)
 - [Design Philosophy](#design-philosophy)
 - [Adaptive Intelligence Layer (LinUCB Bandits)](#adaptive-intelligence-layer-linucb-bandits)
-- [V2 Mesh Architecture & Procurement Lifecycle](#v2-mesh-architecture--procurement-lifecycle)
+- [Procurement Lifecycle](#procurement-lifecycle)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
@@ -189,7 +189,7 @@ Reward feedback is **asynchronous** — computed when `BuyerActor` writes a `DEC
 
 ---
 
-## V2 Mesh Architecture & Procurement Lifecycle
+## Procurement Lifecycle
 
 The V2 distributed mesh executes a 6-phase procurement lifecycle:
 
@@ -252,34 +252,25 @@ curl http://localhost:8000/v2/procurement/health
 python scripts/benchmark_mesh.py
 ```
 
-### ⚙️ Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `MESH_ROLE` | `api` | Container role: `head`, `worker`, or `api` |
-| `MESH_N_SCOUTS` | `3` | Number of Scout actors |
-| `MESH_N_EVALUATORS` | `3` | Number of Evaluator actors |
-| `MESH_N_NEGOTIATORS` | `2` | Number of Negotiator actors |
-| `RAY_ADDRESS` | — | Ray cluster address |
-| `BANDIT_STATE_PATH` | `/app/data/bandit_state.json` | LinUCB bandit persistence path |
-| `NEURO_LLM_BASE_URL` | — | LLM endpoint for neuro-symbolic bridge |
-| `NEURO_LLM_MODEL` | `gemma-2b-it` | LLM model name |
-
 ---
 
 ## Configuration
 
-All configuration is managed via `configs/mesh.yaml` and environment variables.
+All configuration is managed via `configs/base.yaml`, `configs/settings.py`, and the environment variables below — the single source of truth (the Quick-Start table was merged here).
 
 | Variable | Default | Description |
 |---|---|---|
+| `MESH_ROLE` | `api` | Container role: `head`, `worker`, or `api` |
+| `RAY_ADDRESS` | — | Ray cluster address |
 | `MESH_N_SCOUTS` | `3` | ScoutActor pool size |
 | `MESH_N_EVALUATORS` | `3` | EvaluatorActor pool size |
 | `MESH_N_NEGOTIATORS` | `2` | NegotiatorActor pool size |
 | `BANDIT_ALPHA` | `0.5` | LinUCB exploration parameter |
-| `BANDIT_STATE_PATH` | `/app/data/bandit_state.json` | Bandit state persistence |
+| `BANDIT_STATE_PATH` | `/app/data/bandit_state.json` | Bandit state persistence path |
 | `SAFETY_KERNEL_MAX_RETRIES` | `3` | Max LLM retry attempts per quote |
 | `OA_POLICY_PATH` | `/app/policies/` | OPA/Rego rules directory |
+| `NEURO_LLM_BASE_URL` | — | LLM endpoint for the neuro-symbolic bridge |
+| `NEURO_LLM_MODEL` | `gemma-2b-it` | LLM model name |
 
 ---
 
@@ -294,6 +285,7 @@ Interactive docs: [Swagger UI](http://localhost:8000/docs) and [ReDoc](http://lo
 | `POST` | `/v2/procurement/run` | Start a procurement run on the mesh |
 | `GET` | `/v2/procurement/{trace_id}/status` | Blackboard snapshot + stats |
 | `GET` | `/v2/procurement/{trace_id}/timeline` | Causally ordered timeline |
+| `GET` | `/v2/procurement/{trace_id}/snapshot` | Point-in-time state snapshot for auditability |
 | `GET` | `/v2/procurement/health` | Cluster health check |
 
 ### 🏃 V2 Procurement Run
@@ -424,6 +416,14 @@ REQUIREMENT → DISCOVERY → SCORE / RISK → DEAL → DECISION
 ```bash
 docker compose -f docker-compose.mesh.yml up --build -d
 python scripts/benchmark_mesh.py        # exit 0 = all phases verified
+```
+
+### 📊 LinUCB Strategy Convergence Profiling
+
+Run the synthetic Monte Carlo load test to profile bandit strategy convergence across 1,000 procurement rounds:
+
+```bash
+python scripts/profile_bandit_convergence.py
 ```
 
 ---
