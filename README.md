@@ -32,7 +32,7 @@
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
-- [Testing](#testing)
+- [Testing, Verification & CI/CD Pipeline](#testing-verification--cicd-pipeline)
 - [Security](#security)
 - [Changelog](#changelog)
 - [Contributing](#contributing)
@@ -333,41 +333,97 @@ Interactive docs: [Swagger UI](http://localhost:8000/docs) and [ReDoc](http://lo
 
 ---
 
-## Testing
+## Testing, Verification & CI/CD Pipeline
 
-### Unit & Mesh Integration Tests
+The project maintains a full test pyramid on a single `pytest` runner
+(`pyproject.toml`: `asyncio_mode = "auto"`, `testpaths = ["tests"]`), backed by
+**ruff** linting, **mypy** type checking across every runtime package, and
+**Codecov** coverage upload. A deterministic end-to-end terminal suite
+(`test_suite.sh`) and a mesh smoke benchmark (`scripts/benchmark_mesh.py`)
+guard the full signal path.
+
+### Test Suite Overview
+
+| Layer | Directory | Files | Scope |
+|---|---|---|---|
+| Unit | `tests/unit/` | 59 | `swarm.core` (agent, artifact, event, state, timeline, registry, completion), `swarm.domain.*` agents, `swarm.learning`, `swarm.utils.llm_*`, `swarm.integrations`, `swarm.storage.event_store`, plus the ray-free `mesh.neuro` modules (bandits, bridge, schemas, kernel, backend) and `core/` primitives. |
+| Integration | `tests/integration/` | 10 | Full HTTP + flow runs: `test_api.py`, `test_v2_api.py`, `test_execution_flow.py`, `test_governance_flow.py`, `test_feedback_cycle.py`, `test_contract_validation.py`, `test_erp_connector.py`, `test_external_sync_api.py`, `test_external_calls.py`, `test_load.py`. |
+| Mesh | `tests/mesh/` | 5 | `test_actors.py`, `test_bandits.py`, `test_neuro_actors.py`, `test_neuro_bridge.py`, `test_neuro_schemas.py` — actor behaviour, LinUCB bandits, neuro-symbolic retry loop, schema constraints (Ray-free). |
+
+Total: **74 test files / ~820 test functions**, split 59 unit / 10 integration / 5 mesh.
+
+### Running Tests
 
 ```bash
-# Full suite (requires Docker for mesh tests)
+# Full suite (requires Postgres on 5433 for integration tests)
 pytest tests/ -v
 
-# Mesh tests only
+# Unit layer only
+pytest tests/unit/ -v
+
+# V2 mesh (ray-free neuro tests run without a cluster)
 pytest tests/mesh/ -v
 
-# Bandit-specific tests
+# LinUCB bandit only
 pytest tests/mesh/test_bandits.py -v
 
-# With coverage
-pytest tests/ --cov=mesh --cov-report=html
+# With coverage (CI uses --cov=core --cov=api; add mesh locally)
+pytest tests/ --cov=core --cov=api --cov=mesh --cov-report=term --cov-report=html
 ```
 
-### Test Coverage
+> The `mesh` package is optional at import time — neuro/symbol tests run in any
+> environment. Tests that require a live Ray cluster are exercised via Docker
+> Compose and the benchmark script, not the headless CI job.
 
-| Module | Test Files | Focus |
-|---|---|---|
-| `mesh/neuro` | `test_bandits.py`, `test_bridge.py`, `test_schema.py` | LinUCB bandit, neuro-symbolic bridge, schema constraints |
-| `mesh/actors` | `test_negotiator.py`, `test_buyer.py`, `test_safety_kernel.py` | Actor behavior, MCDA, Rego validation |
-| `mesh` | `test_blackboard.py`, `test_cluster.py` | Distributed blackboard, cluster lifecycle |
-| `mesh/channels` | `test_channels.py` | Capability-scoped ACLs |
+### CI/CD Pipeline
 
-### Mesh Integration Tests
+`.github/workflows/ci.yml` runs on every `push` and `pull_request` to `main`.
+A `pgvector/pgvector:pg16` service is exposed on port **`5433`**
+(`DATABASE_URL=postgresql+asyncpg://procurement:procurement@localhost:5433/procurement`),
+Python 3.11 is installed, and `pip install -e ".[dev,ray]"` pulls in Ray. The job is:
+
+1. **Lint** — `ruff check core/ api/ swarm/ examples/ tests/ scripts/ mesh/ legacy/`
+2. **Type check** — `mypy core/ api/ swarm/ examples/ mesh/ legacy/ --ignore-missing-imports`
+3. **Test** — `pytest tests/ -v --tb=short --cov=core --cov=api --cov-report=xml`
+4. **Coverage upload** — `codecov/codecov-action@v4` publishes `coverage.xml`
+
+Both lint and type-check sweep **all** runtime packages (`core`, `api`, `swarm`,
+`mesh`, `legacy`, `examples`, `scripts`), so the Ray mesh and the legacy engine
+share the same quality bar.
+
+### End-to-End Verification
+
+`test_suite.sh` is a terminal integration suite that hits the running HTTP API
+on `http://localhost:8000` (start the stack with `docker compose up -d`). It is
+split into two phases:
+
+- **Functional** — health/DB check, sealed-bid auction → `AWARDED`, ledger
+  hash-chain integrity, auction stats, supplier profiles + similarity search,
+  and validation guards (invalid material → 422, zero quantity → 422, negative
+  supplier count → 422, missing session → 404).
+- **Resilience** — 10 concurrent auctions in a fan-out, 20 sequential bartering
+  auctions, DB persistence across runs, chain integrity under load, a 100 000
+  unit stress run, supplier-memory accumulation, and a determinism check on the
+  similarity endpoint.
 
 ```bash
-# End-to-end mesh lifecycle (requires Ray cluster)
-pytest tests/mesh/test_cluster.py -v
+./test_suite.sh        # exit 0 = all assertions passed
+```
 
-# Bandit persistence across restarts
-pytest tests/mesh/test_bandits.py::test_persistence_roundtrip -v
+### Mesh Benchmark
+
+`scripts/benchmark_mesh.py` validates the **V2** distributed mesh end-to-end
+against a live Docker Compose mesh deployment. It posts a requirement to
+`POST /v2/procurement/run`, polls `GET /v2/procurement/{trace_id}/status`
+until completion, and asserts the full typed-channel signal path executed:
+
+```
+REQUIREMENT → DISCOVERY → SCORE / RISK → DEAL → DECISION
+```
+
+```bash
+docker compose -f docker-compose.mesh.yml up --build -d
+python scripts/benchmark_mesh.py        # exit 0 = all phases verified
 ```
 
 ---
