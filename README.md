@@ -72,6 +72,8 @@ The system has evolved from a single-process `asyncio` engine into a distributed
 
 **Full architecture and diagrams:** See [`docs/v2_mesh_architecture.md`](docs/v2_mesh_architecture.md) for complete lifecycle, ACL matrix, neuro-symbolic bridge flow, and API reference.
 
+```
+
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                          DISTRIBUTED BLACKBOARD (Ray Actor)                             │
 │                      [Append-Only Traces | Capability-Scoped ACLs]                      │
@@ -101,7 +103,7 @@ The system has evolved from a single-process `asyncio` engine into a distributed
                       │ (OPA/Rego Policies) │
                       └─────────────────────┘
 
-
+```
 
 
 
