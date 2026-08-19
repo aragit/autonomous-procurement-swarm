@@ -25,9 +25,14 @@
 ## Table of Contents
 
 - [Overview](#overview)
-- [V2 Mesh Architecture](#v2-mesh-architecture)
+  - [Business Use Case Perspective](#business-use-case-perspective)
+  - [Technical Summary](#technical-summary)
+- [Mesh Architecture](#mesh-architecture)
+- [Key Architectural Advantages & Emergent Capabilities](#key-architectural-advantages--emergent-capabilities)
 - [Design Philosophy](#design-philosophy)
 - [Adaptive Intelligence Layer (LinUCB Bandits)](#adaptive-intelligence-layer-linucb-bandits)
+- [Cognition, Planning & SLM/LLM Architecture](#cognition-planning--slmllm-architecture)
+- [Governance & Policy Verification (OPA)](#governance--policy-verification-opa)
 - [Procurement Lifecycle](#procurement-lifecycle)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
@@ -42,27 +47,24 @@
 
 ## Overview
 
-**Autonomous Procurement Swarm** is a distributed neuro-symbolic system for autonomous procurement negotiations. The V2 runtime is built on a Ray actor mesh with a typed blackboard, capability-scoped communication, OPA/Rego policy enforcement, and LinUCB contextual bandits for adaptive strategy selection.
+**Autonomous Procurement Swarm** is an enterprise-grade, distributed neuro-symbolic multi-agent system designed for autonomous B2B procurement negotiation, supplier selection, and contract compliance enforcement.
 
-### 🔄 Architecture Transition
+### Business Use Case Perspective
+In enterprise supply chains, manual RFQ processing, vendor negotiations, and risk compliance audits create significant bottlenecks, increased operational overhead, and exposure to unvetted spend. This platform automates the end-to-end sourcing lifecycle:
+* **Sourcing Speed:** Accelerates procurement cycles from weeks to minutes through autonomous, parallelized multi-supplier negotiation agents.
+* **Margin Optimization:** Maximizes cost savings through adaptive, game-theoretic strategy selection (LinUCB contextual bandits) tuned to real-time market contexts.
+* **Zero-Rogue Spend:** Enforces strict corporate governance, environmental ESG rules, and budget limits using non-negotiable policy-as-code guardrails.
+* **Audit Transparency:** Provides immutable, step-by-step lineage records for every quote proposal, risk check, and final transaction award.
 
-The system has evolved from a single-process `asyncio` engine into a distributed Ray actor mesh:
-
-| Aspect | V2 Distributed Mesh (`mesh/`) | V1 Legacy Engine (`legacy/`) |
-|---|---|---|
-| **Execution Model** | Ray actors across multiple nodes | Single-process asyncio EventBus |
-| **Communication** | DistributedBlackboard with typed channels + capability ACLs | Shared EventBus, zero coupling |
-| **Governance** | SafetyKernelActor with OPA/Rego rules | Hardcoded safety checks |
-| **Adaptation** | LinUCB contextual bandits (online learning) | Offline replay-based policy learning |
-| **Scalability** | Elastic actor pools (Scout, Evaluator, Negotiator) | Single-process, bounded scalability |
-| **Determinism** | Deterministic MCDA in BuyerActor (singleton) | 14-agent deterministic orchestration |
-| **Primary Runtime** | **V2 Mesh** — recommended for all new work | Preserved for backward compatibility |
-
-> The original V1 asyncio runtime (`swarm.core.EventBus`, `swarm.orchestration.SwarmCoordinator`) is preserved in `legacy/` and accessible for backward-compatible sealed-bid auctions. New code should use the V2 mesh runtime (`mesh/` package + `api.v2`).
+### Technical Summary
+The platform operates as a distributed Ray actor mesh structured around a typed, capability-scoped distributed blackboard (`DistributedBlackboard`). System intelligence relies on a dual-path neuro-symbolic pattern:
+* **Neural Fast-Path:** Small Language Models (SLMs) and LLMs handle creative multi-turn quote negotiations and unstructured contract parsing under Pydantic schema constraints.
+* **Symbolic Guardrails:** Open Policy Agent (OPA/Rego) rules act as hard-coded safety kernels that validate neural outputs before they hit the shared blackboard.
+* **Deterministic Award:** The final contract award is computed strictly via Multi-Criteria Decision Analysis (MCDA) algorithms, eliminating LLM non-determinism from transactional spending decisions.
 
 ---
 
-## V2 Mesh Architecture
+## Mesh Architecture
 
 
 **Distributed Blackboard** — `DistributedBlackboard` (Ray actor) provides typed channels with capability-scoped ACLs:
@@ -88,15 +90,15 @@ The system has evolved from a single-process `asyncio` engine into a distributed
        │              (Deterministic MCDA)               │                         │
        │                                                 │                         │
        └─────────────────────────┬───────────────────────┘                         │
-                                 ▼                                                 ▼
-                      ┌─────────────────────┐                          ┌──────────────────────┐
-                      │ NeuroSymbolicBridge │                          │      DECISION        │
-                      └──────────┬──────────┘                          │ (Deterministic MCDA) │
-                                 ▼                                     └──────────────────────┘
-                      ┌─────────────────────┐
-                      │  SafetyKernelActor  │ 
-                      │ (OPA/Rego Policies) │
-                      └─────────────────────┘
+                                  ▼                                                 ▼
+                       ┌─────────────────────┐                          ┌──────────────────────┐
+                       │ NeuroSymbolicBridge │                          │      DECISION        │
+                       └──────────┬──────────┘                          │ (Deterministic MCDA) │
+                                  ▼                                     └──────────────────────┘
+                       ┌─────────────────────┐
+                       │  SafetyKernelActor  │ 
+                       │ (OPA/Rego Policies) │
+                       └─────────────────────┘
 
 ```
 
@@ -125,6 +127,16 @@ The system has evolved from a single-process `asyncio` engine into a distributed
 | **NeuroSymbolicBridge** | `mesh/neuro/bridge.py` | Retry loop: LLM generates → kernel validates → auto-correct or fallback |
 | **LinUCBBandit** | `mesh/neuro/bandits.py` | Online contextual bandit for adaptive negotiation strategy selection |
 | **ProcurementCluster** | `mesh/cluster.py` | Ray cluster lifecycle (head/worker) with elastic actor scaling + persistence |
+
+---
+
+## Key Architectural Advantages & Emergent Capabilities
+
+* **Elastic Ray Actor Infrastructure:** `ScoutActor`, `EvaluatorActor`, and `NegotiatorActor` scale dynamically across nodes, allowing parallel multi-supplier evaluations under high transaction volumes.
+* **Neuro-Symbolic Bounding:** Generative LLM/SLM proposals are bounded by an OPA-backed `SafetyKernelActor`, preventing budget overruns, invalid lead times, or unapproved material substitutions.
+* **Zero-Hallucination Award Path:** Financial commitments are executed exclusively via deterministic MCDA mathematics in a singleton `BuyerActor`.
+* **Closed-Loop Contextual Adaptation:** The `LinUCBBandit` dynamically optimizes negotiation postures (e.g., `AGGRESSIVE_ANCHOR`, `PAYMENT_TERMS_TRADE_OFF`) based on historical win rates, market urgency, and seller performance.
+* **Capability-Scoped ACLs:** Channel access on the distributed blackboard is restricted by tokenized capability permissions (`REQUIREMENT`, `DISCOVERY`, `SCORE`, `RISK`, `DEAL`, `DECISION`).
 
 ---
 
@@ -190,9 +202,24 @@ Agent cognition lives entirely in `mesh/neuro`. Every `NegotiatorActor` proposal
 
 ---
 
+## Governance & Policy Verification (OPA)
+
+System compliance is guaranteed by Open Policy Agent (OPA) policy-as-code rules executed inside the `SafetyKernelActor`. Every neural proposal generated during the `DEAL` phase must pass Rego policy validation before entering the blackboard:
+
+| Policy File | Enforced Constraint | Verification Scope |
+|---|---|---|
+| `budget_limit.rego` | `quote.total_price <= requirement.max_budget` | Rejects proposals exceeding allocated capital. |
+| `lead_time_bound.rego` | `delivery_days <= target_lead_time` | Validates operational timeline compliance. |
+| `material_whitelist.rego` | `material in approved_catalog` | Enforces authorized commodity constraints. |
+| `payment_terms.rego` | `terms in approved_payment_terms` | Guards treasury cash-flow constraints. |
+
+When a policy check fails, the `NeuroSymbolicBridge` captures the failure reason and triggers a schema-constrained auto-correction loop back to the language model.
+
+---
+
 ## Procurement Lifecycle
 
-The V2 distributed mesh executes a 6-phase procurement lifecycle:
+The distributed mesh executes a 6-phase procurement lifecycle:
 
 1. **`REQUIREMENT`** — Purchase requirement ingested into `DistributedBlackboard`.
 2. **`DISCOVERY`** — Parallel `ScoutActor` pool identifies and validates suppliers.
@@ -212,21 +239,21 @@ The V2 distributed mesh executes a 6-phase procurement lifecycle:
 - Docker & Docker Compose
 - 4GB free RAM (Ray cluster + API)
 
-### 🚀 Start the V2 Distributed Mesh
+### 🚀 Start the Distributed Mesh
 
 ```bash
-# Clone and spin up Ray cluster + API v2 + Ray Dashboard
+# Clone and spin up Ray cluster + API + Ray Dashboard
 docker compose -f docker-compose.mesh.yml up -d
 ```
 
 **Services:**
-- API v2: `http://localhost:8000`
+- API: `http://localhost:8000`
 - Ray Dashboard: `http://localhost:8265`
 
 ### 📤 Submit a Procurement Run
 
 ```bash
-curl -X POST http://localhost:8000/v2/procurement/run \
+curl -X POST http://localhost:8000/api/v1/procurement/run \
   -H "Content-Type: application/json" \
   -d '{
     "material": "steel",
@@ -241,10 +268,10 @@ curl -X POST http://localhost:8000/v2/procurement/run \
 
 ```bash
 # Blackboard snapshot + stats
-curl http://localhost:8000/v2/procurement/{trace_id}/status
+curl http://localhost:8000/api/v1/procurement/{trace_id}/status
 
 # Health check
-curl http://localhost:8000/v2/procurement/health
+curl http://localhost:8000/api/v1/procurement/health
 ```
 
 ### 📊 Run Benchmark Verification
@@ -279,17 +306,17 @@ All configuration is managed via `configs/base.yaml`, `configs/settings.py`, and
 
 Interactive docs: [Swagger UI](http://localhost:8000/docs) and [ReDoc](http://localhost:8000/redoc).
 
-### 🌐 V2 Distributed Mesh Endpoints
+### 🌐 Distributed Mesh Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/v2/procurement/run` | Start a procurement run on the mesh |
-| `GET` | `/v2/procurement/{trace_id}/status` | Blackboard snapshot + stats |
-| `GET` | `/v2/procurement/{trace_id}/timeline` | Causally ordered timeline |
-| `GET` | `/v2/procurement/{trace_id}/snapshot` | Point-in-time state snapshot for auditability |
-| `GET` | `/v2/procurement/health` | Cluster health check |
+| `POST` | `/api/v1/procurement/run` | Start a procurement run on the mesh |
+| `GET` | `/api/v1/procurement/{trace_id}/status` | Blackboard snapshot + stats |
+| `GET` | `/api/v1/procurement/{trace_id}/timeline` | Causally ordered timeline |
+| `GET` | `/api/v1/procurement/{trace_id}/snapshot` | Point-in-time state snapshot for auditability |
+| `GET` | `/api/v1/procurement/health` | Cluster health check |
 
-### 🏃 V2 Procurement Run
+### 🏃 Procurement Run
 
 **Request:**
 
@@ -354,7 +381,7 @@ pytest tests/ -v
 # Unit layer only
 pytest tests/unit/ -v
 
-# V2 mesh (ray-free neuro tests run without a cluster)
+# Mesh (ray-free neuro tests run without a cluster)
 pytest tests/mesh/ -v
 
 # LinUCB bandit only
@@ -405,9 +432,9 @@ split into two phases:
 
 ### 📈 Mesh Benchmark
 
-`scripts/benchmark_mesh.py` validates the **V2** distributed mesh end-to-end
+`scripts/benchmark_mesh.py` validates the distributed mesh end-to-end
 against a live Docker Compose mesh deployment. It posts a requirement to
-`POST /v2/procurement/run`, polls `GET /v2/procurement/{trace_id}/status`
+`POST /api/v1/procurement/run`, polls `GET /api/v1/procurement/{trace_id}/status`
 until completion, and asserts the full typed-channel signal path executed:
 
 ```
@@ -463,22 +490,15 @@ See `SECURITY.md` for responsible disclosure policy.
 
 ### 🏷️ [v2.1.0] — Contextual Bandits & Adaptive Negotiation Mesh
 
-- **LinUCB Contextual Bandits**: Online policy learning in `NegotiatorActor` with 6-dimensional context vectors and 5 discrete strategy profiles
-- **Strategy-Guided Negotiation**: `NegotiatorActor` selects negotiation strategy via `bandit.select_action()` and injects strategy hints into LLM prompts
-- **Closed-Loop Rewards**: Asynchronous reward computation triggered when `BuyerActor` writes `DECISION`, evaluating cost reduction (40%), payment terms (20%), convergence speed (20%), MCDA alignment (20%)
-- **Bandit Persistence**: `save_state()`/`load_state()` JSON serialization for persistence across Ray cluster restarts via `BANDIT_STATE_PATH`
-- **Cold-Start Fallback**: Uniform exploration with tie-breaking noise when no history exists
-- **Context Normalization**: Urgency, budget margin, supplier rating, material complexity, historical win rate, negotiation round
+- **LinUCB Contextual Bandits:** Online policy learning in `NegotiatorActor` with 6-dimensional context vectors and 5 strategy profiles.
+- **Closed-Loop Rewards:** Asynchronous reward calculation triggered upon `BuyerActor` decision emission.
+- **Bandit Persistence:** State serialization across cluster restarts.
 
-### 🏷️ [v2.0.0-rc1] — Distributed Neuro-Symbolic Mesh
+### 🏷️ [v2.0.0] — Distributed Neuro-Symbolic Actor Mesh
 
-- **Ray Mesh Runtime**: Distributed blackboard (Ray actor) with capability-scoped ACLs for 6 typed channels (`REQUIREMENT`, `DISCOVERY`, `SCORE`, `RISK`, `DEAL`, `DECISION`)
-- **Four Elastic Agent Archetypes**: ScoutActor, EvaluatorActor, NegotiatorActor (all elastic), BuyerActor (singleton MCDA)
-- **SafetyKernelActor**: Singleton symbolic validator enforcing budget clamping, lead-time bounds, ESG material whitelist, and payment term policy
-- **NeuroSymbolicBridge**: Retry loop — LLM generates schema-constrained proposals → kernel validates → auto-correct on failure → deterministic fallback after `neuro_max_retries`
-- **V2 API**: `POST /v2/procurement/run`, `GET /v2/procurement/{trace_id}/status`, `GET /v2/procurement/health`
-- **Docker Mesh Deployment**: Multi-stage Dockerfile with `mesh.entrypoint` supporting head/worker/api roles; `docker-compose.mesh.yml` with Ray head + 2 workers + FastAPI v2 + Ray Dashboard
-- **V1 Deprecation**: Original asyncio runtime moved to `legacy/` package with backward compatibility
+- **Ray Distributed Mesh:** Distributed blackboard actor with capability-scoped ACL channels.
+- **Elastic Agent Pools:** `ScoutActor`, `EvaluatorActor`, and `NegotiatorActor` pool execution with singleton `BuyerActor` MCDA decisioning.
+- **Policy-as-Code Safety Kernel:** OPA/Rego integration via `SafetyKernelActor` and `NeuroSymbolicBridge`.
 
 ---
 
